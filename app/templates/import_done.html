@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Импорт завершён</h1></div>
+<div class="result-box">
+  <p>Площадка: <b>{{ marketplace_label(marketplace) }}</b>{% if auto %} <span class="muted">(определена автоматически)</span>{% endif %}</p>
+  <ul>
+    <li>Создано новых книг: <b>{{ created }}</b></li>
+    <li>Обновлено существующих: <b>{{ updated }}</b></li>
+    <li>Пропущено (нет названия и SKU): <b>{{ skipped }}</b></li>
+  </ul>
+  <a href="/" class="btn">Открыть каталог</a>
+  <a href="/import" class="btn muted">Импортировать ещё</a>
+</div>
+{% endblock %}

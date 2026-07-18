@@ -1,0 +1,65 @@
+# Центральный сервер «Букинист»: приложение + PostgreSQL + Caddy (HTTPS).
+# Запуск на сервере:  docker compose up -d
+# Настройки берутся из файла .env.prod (скопируйте из .env.prod.example).
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      # Приложение внутри docker ходит в базу по имени сервиса db.
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # На сервере публичный адрес постоянный — туннель loca.lt не нужен.
+      TUNNEL_ENABLED: "false"
+    volumes:
+      # Загруженные фото и фиды Avito переживают перезапуск и пересборку образа.
+      - uploads_data:/app/app/static/uploads
+      - feeds_data:/app/feeds
+      # Папка data хранит ключ шифрования (fernet.key), если FERNET_KEY не задан
+      # в .env.prod. Без этого тома пересоздание контейнера сбросило бы ключ и
+      # сохранённые ключи площадок перестали бы расшифровываться.
+      - data_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Домен и почта для Let's Encrypt подставляются из .env.prod.
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  db_data:
+  uploads_data:
+  feeds_data:
+  data_data:
+  caddy_data:
+  caddy_config:

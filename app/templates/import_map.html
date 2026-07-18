@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Сопоставление колонок</h1>
+  <span class="muted">{{ marketplace_label(marketplace) }} · {{ total }} строк</span>
+</div>
+
+<p class="muted">Не удалось распознать колонки автоматически. Укажите вручную, какая колонка
+файла соответствует какому полю книги. Обязательны хотя бы «Название» или «Артикул».</p>
+
+<form method="post" action="/import/run" class="book-form">
+  <table class="grid">
+    <thead><tr><th>Поле книги</th><th>Колонка файла</th></tr></thead>
+    <tbody>
+      {% for field, label in target_fields.items() %}
+      <tr>
+        <td>{{ label }}</td>
+        <td>
+          <select name="map_{{ field }}">
+            <option value="">— не импортировать —</option>
+            {% for col in columns %}
+            <option value="{{ col }}" {% if auto_map.get(field) == col %}selected{% endif %}>
+              {{ col }}
+            </option>
+            {% endfor %}
+          </select>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Предпросмотр (первые строки)</h2>
+  <div class="scroll-x">
+    <table class="grid small">
+      <thead><tr>{% for col in columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in sample %}
+        <tr>{% for col in columns %}<td>{{ row[col] }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <button type="submit">Импортировать {{ total }} строк</button>
+</form>
+{% endblock %}

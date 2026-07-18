@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Настройки площадок</h1></div>
+
+<p class="muted">Ключи хранятся в зашифрованном виде. Пока площадка выключена, программа
+меняет только локальные статусы и никуда не отправляет данные. Включите площадку и введите
+ключи, чтобы выставление, снятие и опрос заказов шли по-настоящему.</p>
+
+{% if saved %}<div class="notice ok">Настройки «{{ marketplace_label(saved) }}» сохранены.</div>{% endif %}
+{% if checked %}
+  {% set mp, status = checked.split(':') %}
+  {% if status == 'ok' %}
+    <div class="notice ok">{{ marketplace_label(mp) }}: подключение успешно.</div>
+  {% else %}
+    <div class="notice err">{{ marketplace_label(mp) }}: подключиться не удалось. Подробности в журнале.</div>
+  {% endif %}
+{% endif %}
+
+<div class="settings-grid">
+  {% for card in cards %}
+  <div class="settings-card">
+    <div class="settings-card-head">
+      <h2>{{ marketplace_label(card.marketplace) }}</h2>
+      {% if card.enabled %}
+        <span class="badge badge-in_stock">Включена</span>
+      {% else %}
+        <span class="badge badge-withdrawn">Выключена</span>
+      {% endif %}
+    </div>
+
+    {% if not card.supported %}
+      <p class="muted">Живая интеграция появится на следующей фазе. Ключи можно сохранить заранее.</p>
+    {% elif card.has_credentials %}
+      <p class="muted">Ключи сохранены{% if card.updated_at %} · обновлены {{ card.updated_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}. Оставьте поля пустыми, чтобы не менять.</p>
+    {% else %}
+      <p class="muted">Ключи ещё не заданы.</p>
+    {% endif %}
+
+    <form method="post" action="/settings/save" class="book-form" data-marketplace="{{ card.marketplace }}">
+      <input type="hidden" name="marketplace" value="{{ card.marketplace }}">
+      {% for key, label in card.fields %}
+      <label>{{ label }}
+        {% if key.endswith('_id') %}
+        {# Идентификаторы (склад и т.п.) — не секреты, показываем обычным полем. #}
+        <input type="text" name="cred_{{ key }}" autocomplete="off"
+               placeholder="{{ 'сохранено, введите новое для замены' if card.has_credentials else '' }}">
+        {% else %}
+        <input type="password" name="cred_{{ key }}" autocomplete="off"
+               placeholder="{{ '••••••• (сохранено)' if card.has_credentials else '' }}">
+        {% endif %}
+      </label>
+      {% endfor %}
+
+      <label class="checkbox">
+        <input type="checkbox" name="enabled" {{ 'checked' if card.enabled else '' }}>
+        Включить площадку (реальные вызовы API)
+      </label>
+      <div class="settings-actions">
+        <button type="submit">Сохранить</button>
+      </div>
+    </form>
+
+    {% if card.supported and card.has_credentials %}
+    <form method="post" action="/settings/check" class="inline-form">
+      <input type="hidden" name="marketplace" value="{{ card.marketplace }}">
+      <button type="submit" class="secondary">Проверить подключение</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,18 @@
+# Caddy сам выпускает и продлевает HTTPS-сертификат Let's Encrypt для вашего домена.
+# {$DOMAIN} и {$ACME_EMAIL} подставляются из .env.prod через docker-compose.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# Весь трафик проксируем в приложение (сервис app в docker-сети, порт 8000).
+	reverse_proxy app:8000
+
+	# Фото книг доходят до 10 МБ — поднимаем лимит тела запроса на загрузку.
+	request_body {
+		max_size 15MB
+	}
+
+	encode gzip
+}

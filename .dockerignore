@@ -1,0 +1,15 @@
+# В образ не тащим локальное окружение, базы и секреты.
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+.env.prod
+data/
+*.db
+feeds/
+app/static/uploads/
+.git/
+*.xlsx
+srv*.log
+srv.err

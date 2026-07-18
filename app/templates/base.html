@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Букинист{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css?v=5">
+</head>
+<body>
+  {% if request.session.get('authed') %}
+  {% set path = request.url.path %}
+  <div class="layout">
+    <aside class="sidebar">
+      <a href="/" class="brand">📚 <span>Букинист</span></a>
+      <nav>
+        <a href="/" class="{{ 'active' if path == '/' or path.startswith('/books/') and path != '/books/new' else '' }}"><span>Каталог</span></a>
+        <a href="/books/new" class="{{ 'active' if path == '/books/new' else '' }}"><span>Добавить книгу</span></a>
+        <a href="/import" class="{{ 'active' if path.startswith('/import') else '' }}"><span>Импорт</span></a>
+        <a href="/archive" class="{{ 'active' if path.startswith('/archive') else '' }}"><span>Архив</span></a>
+        <a href="/log" class="{{ 'active' if path.startswith('/log') else '' }}"><span>Журнал</span></a>
+        <a href="/settings" class="{{ 'active' if path.startswith('/settings') else '' }}"><span>Настройки</span></a>
+      </nav>
+      <a href="/logout" class="logout"><span>Выход</span></a>
+    </aside>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% else %}
+  <main>
+    {{ self.content() }}
+  </main>
+  {% endif %}
+</body>
+</html>

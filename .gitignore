@@ -1,0 +1,18 @@
+.env
+.env.prod
+data/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+feeds/
+
+# Служебное и локальное — в репозиторий не нужно.
+.claude/
+memory/
+*.log
+*.err
+*.xlsx
+wb_only_sku.txt
+app/static/uploads/

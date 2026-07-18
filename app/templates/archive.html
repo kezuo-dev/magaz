@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Архив <span class="muted">({{ total }} книг)</span></h1>
+  <a href="/" class="btn muted">← В каталог</a>
+</div>
+
+<p class="muted">Проданные и снятые книги, убранные из основного каталога. Книга попадает
+сюда автоматически спустя срок ожидания после снятия с продажи — либо вручную кнопкой «В архив».
+Любую можно вернуть обратно в каталог.</p>
+
+<form method="get" action="/archive" class="filters">
+  <input type="text" name="q" value="{{ q }}" placeholder="Поиск: название, SKU, ISBN">
+  <select name="status">
+    <option value="">Все статусы</option>
+    {% for s in statuses %}
+    <option value="{{ s.value }}" {% if status == s.value %}selected{% endif %}>{{ book_status_label(s.value) }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Искать</button>
+</form>
+
+<form method="post" action="/books/bulk">
+  <div class="bulk-bar">
+    <label>С отмеченными:</label>
+    <button type="submit" name="action" value="restore" data-confirm="Вернуть отмеченные книги в основной каталог?">Вернуть в каталог</button>
+  </div>
+
+  <table class="grid">
+    <thead>
+      <tr>
+        <th></th>
+        <th>Артикул</th>
+        <th>Название</th>
+        <th>Цена</th>
+        <th>Статус</th>
+        <th>Площадки</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for book in books %}
+      <tr>
+        <td><input type="checkbox" class="rowcheck" name="book_ids" value="{{ book.id }}"></td>
+        <td class="mono">{{ book.sku }}</td>
+        <td><a href="/books/{{ book.id }}">{{ book.title }}</a></td>
+        <td>{{ "%.0f"|format(book.price) if book.price else "—" }}</td>
+        <td><span class="badge badge-{{ book.status }}">{{ book_status_label(book.status) }}</span></td>
+        <td class="mp-cells">
+          {% for l in book.listings %}
+          <span class="mp mp-{{ l.status }}" title="{{ marketplace_label(l.marketplace) }}: {{ listing_status_label(l.status) }}">{{ l.marketplace[:2]|upper }}</span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted center">В архиве пока пусто.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</form>
+
+<script>
+  // Подтверждение массовых действий + защита от пустого выбора.
+  for (const btn of document.querySelectorAll(".bulk-bar button[data-confirm]")) {
+    btn.addEventListener("click", function (e) {
+      const checked = document.querySelectorAll(".rowcheck:checked").length;
+      if (checked === 0) {
+        e.preventDefault();
+        alert("Сначала отметьте книги галочками.");
+        return;
+      }
+      if (!confirm(this.dataset.confirm + "\nОтмечено книг: " + checked)) {
+        e.preventDefault();
+      }
+    });
+  }
+</script>
+
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a href="/archive?q={{ q }}&status={{ status }}&page={{ page-1 }}">← Назад</a>{% endif %}
+  <span>Стр. {{ page }} из {{ pages }}</span>
+  {% if page < pages %}<a href="/archive?q={{ q }}&status={{ status }}&page={{ page+1 }}">Вперёд →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

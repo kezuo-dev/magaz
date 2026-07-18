@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Журнал синхронизации</h1></div>
+
+<form method="get" action="/log" class="filters">
+  <select name="marketplace" onchange="this.form.submit()">
+    <option value="">Все площадки</option>
+    {% for m in marketplaces %}
+    <option value="{{ m.value }}" {{ 'selected' if marketplace == m.value else '' }}>{{ marketplace_label(m.value) }}</option>
+    {% endfor %}
+  </select>
+  <label class="checkbox">
+    <input type="checkbox" name="only_errors" value="1" {{ 'checked' if only_errors else '' }} onchange="this.form.submit()">
+    Только ошибки
+  </label>
+</form>
+
+{% if not entries %}
+  <p class="muted">Записей пока нет. Здесь появятся все действия с площадками: выставление,
+  снятие, опрос заказов, проверки подключения.</p>
+{% else %}
+<table class="grid">
+  <thead>
+    <tr>
+      <th>Время</th>
+      <th>Площадка</th>
+      <th>Действие</th>
+      <th>Итог</th>
+      <th>Сообщение</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    <tr class="{{ 'row-error' if not e.ok else '' }}">
+      <td class="nowrap">{{ e.created_at.strftime('%d.%m %H:%M:%S') }}</td>
+      <td>{{ marketplace_label(e.marketplace) if e.marketplace else '—' }}</td>
+      <td>{{ e.action }}</td>
+      <td>{% if e.ok %}<span class="badge badge-in_stock">ОК</span>{% else %}<span class="badge badge-error">Ошибка</span>{% endif %}</td>
+      <td>{{ e.message or '' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

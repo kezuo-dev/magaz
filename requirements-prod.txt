@@ -1,0 +1,4 @@
+# Дополнительно к requirements.txt — только на VPS с PostgreSQL.
+# Ставится в докер-образе, где есть системные библиотеки Postgres.
+-r requirements.txt
+psycopg2-binary==2.9.10

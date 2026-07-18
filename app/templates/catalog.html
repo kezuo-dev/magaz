@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Каталог <span class="muted">({{ total }} книг)</span></h1>
+  <div class="head-actions">
+    <button type="button" class="danger" onclick="document.getElementById('wipe-box').hidden = false">Очистить каталог</button>
+  </div>
+</div>
+
+{% if wiped %}<div class="notice ok">Каталог полностью очищен.</div>{% endif %}
+{% if wipe_error %}<div class="notice err">Неверный пароль. Каталог не тронут.</div>{% endif %}
+
+<div id="wipe-box" class="wipe-box" hidden>
+  <form method="post" action="/catalog/wipe" onsubmit="return confirm('Удалить ВСЕ книги, лоты и заказы из программы без возможности восстановления?\n\nНа Ozon и других площадках товары НЕ будут затронуты.')">
+    <b>Очистка каталога в программе</b>
+    <p class="muted">Удаляет все книги, лоты, заказы и загруженные фото <b>только в этой программе</b>. Каталог на Ozon и других площадках не затрагивается. Действие необратимо.</p>
+    <div class="wipe-row">
+      <input type="password" name="password" placeholder="Пароль очистки" required autocomplete="off">
+      <button type="submit" class="danger">Удалить всё</button>
+      <button type="button" onclick="document.getElementById('wipe-box').hidden = true">Отмена</button>
+    </div>
+  </form>
+</div>
+
+<form method="get" action="/" class="filters">
+  <input type="text" name="q" value="{{ q }}" placeholder="Поиск: название, SKU, ISBN">
+  <select name="status">
+    <option value="">Все статусы</option>
+    {% for s in statuses %}
+    <option value="{{ s.value }}" {% if status == s.value %}selected{% endif %}>{{ book_status_label(s.value) }}</option>
+    {% endfor %}
+  </select>
+  <select name="marketplace">
+    <option value="">Все площадки</option>
+    {% for m in marketplaces %}
+    <option value="{{ m.value }}" {% if marketplace == m.value %}selected{% endif %}>{{ marketplace_label(m.value) }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Искать</button>
+</form>
+
+<form method="post" action="/books/bulk">
+  <div class="bulk-bar">
+    <label>С отмеченными:</label>
+    <button type="submit" name="action" value="publish" data-confirm="Выставить отмеченные книги на площадки?">Выставить</button>
+    <button type="submit" name="action" value="withdraw" data-confirm="Снять отмеченные книги с продажи?">Снять</button>
+    <button type="submit" name="action" value="mark_sold" class="danger" data-confirm="Отметить отмеченные книги проданными? Они будут сняты со всех площадок.">Отметить проданными</button>
+    <button type="submit" name="action" value="archive" class="secondary" data-confirm="Убрать отмеченные книги в архив сейчас, не дожидаясь автопереноса?">В архив</button>
+  </div>
+
+  <div class="mp-picker">
+    <span class="mp-picker-label">Площадки для «Выставить» / «Снять»:</span>
+    <label class="mp-chip"><input type="checkbox" id="mp-all" checked> Все</label>
+    {% for m in marketplaces %}
+    <label class="mp-chip"><input type="checkbox" class="mp-target" name="targets" value="{{ m.value }}"> {{ marketplace_label(m.value) }}</label>
+    {% endfor %}
+  </div>
+
+  <table class="grid">
+    <thead>
+      <tr>
+        <th></th>
+        <th>Артикул</th>
+        <th>Название</th>
+        <th>Цена</th>
+        <th>Статус</th>
+        <th>Площадки</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for book in books %}
+      <tr>
+        <td><input type="checkbox" class="rowcheck" name="book_ids" value="{{ book.id }}"></td>
+        <td class="mono">{{ book.sku }}</td>
+        <td><a href="/books/{{ book.id }}">{{ book.title }}</a></td>
+        <td>{{ "%.0f"|format(book.price) if book.price else "—" }}</td>
+        <td>
+          <span class="badge badge-{{ book.status }}">{{ book_status_label(book.status) }}</span>
+          {% set days = days_until_archive(book) %}
+          {% if days is not none %}
+          <div class="archive-hint">🗄 в архив {% if days > 0 %}через {{ days }} дн.{% else %}скоро{% endif %}</div>
+          {% endif %}
+        </td>
+        <td class="mp-cells">
+          {% for l in book.listings %}
+          <span class="mp mp-{{ l.status }}" title="{{ l.marketplace }}: {{ listing_status_label(l.status) }}">{{ l.marketplace[:2]|upper }}</span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted center">Ничего не найдено. Загрузите каталог через «Импорт».</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</form>
+
+<script>
+  // Выбор площадок: «Все» и отдельные площадки взаимно исключают друг друга.
+  // Пусто (только «Все») = действовать на всех — так это и уходит на сервер.
+  const mpAll = document.getElementById("mp-all");
+  const mpTargets = document.querySelectorAll(".mp-target");
+  function syncAllFromTargets() {
+    const anyPicked = Array.from(mpTargets).some(cb => cb.checked);
+    mpAll.checked = !anyPicked;
+  }
+  mpAll.addEventListener("change", function () {
+    if (this.checked) {
+      mpTargets.forEach(cb => (cb.checked = false));
+    } else if (!Array.from(mpTargets).some(cb => cb.checked)) {
+      // Нельзя снять «Все», не выбрав ничего другого — возвращаем галочку.
+      this.checked = true;
+    }
+  });
+  mpTargets.forEach(cb => cb.addEventListener("change", function () {
+    if (this.checked) mpAll.checked = false;
+    else syncAllFromTargets();
+  }));
+
+  // Подтверждение массовых действий + защита от пустого выбора.
+  for (const btn of document.querySelectorAll(".bulk-bar button[data-confirm]")) {
+    btn.addEventListener("click", function (e) {
+      const checked = document.querySelectorAll(".rowcheck:checked").length;
+      if (checked === 0) {
+        e.preventDefault();
+        alert("Сначала отметьте книги галочками.");
+        return;
+      }
+      // Для «Выставить»/«Снять» уточняем область площадок в подтверждении.
+      let scope = "";
+      const act = this.value;
+      if (act === "publish" || act === "withdraw") {
+        const picked = Array.from(mpTargets).filter(cb => cb.checked).map(cb => cb.parentNode.textContent.trim());
+        scope = "\nПлощадки: " + (picked.length ? picked.join(", ") : "все");
+      }
+      if (!confirm(this.dataset.confirm + "\nОтмечено книг: " + checked + scope)) {
+        e.preventDefault();
+      }
+    });
+  }
+</script>
+
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page-1 }}">← Назад</a>{% endif %}
+  <span>Стр. {{ page }} из {{ pages }}</span>
+  {% if page < pages %}<a href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page+1 }}">Вперёд →</a>{% endif %}
+  <form method="get" action="/" class="pager-go">
+    <input type="hidden" name="q" value="{{ q }}">
+    <input type="hidden" name="status" value="{{ status }}">
+    <input type="hidden" name="marketplace" value="{{ marketplace }}">
+    <label>Перейти к стр.
+      <input type="number" name="page" value="{{ page }}" min="1" max="{{ pages }}">
+    </label>
+    <button type="submit">ОК</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
