@@ -399,12 +399,27 @@ class OzonClient(MarketplaceClient):
         return rows
 
     def fetch_orders(self) -> list[OrderInfo]:
-        """Получить недавние отправления FBS. Каждый товар в заказе — проданная книга."""
+        """Получить недавние отправления FBS. Каждый товар в заказе — проданная книга.
+
+        Ozon требует диапазон дат: без processed_at_from/processed_at_to метод
+        отвечает 400 «processed_at_to must be set». Берём окно последних дней —
+        свежие заказы для кросс-снятия, старые нам уже не нужны.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(days=3)
+        # Формат Ozon — ISO 8601 с Z на конце.
+        fmt = "%Y-%m-%dT%H:%M:%S.000Z"
         data = self._post(
             "/v3/posting/fbs/list",
             {
                 "dir": "DESC",
-                "filter": {"status": ""},
+                "filter": {
+                    "status": "",
+                    "processed_at_from": since.strftime(fmt),
+                    "processed_at_to": now.strftime(fmt),
+                },
                 "limit": 100,
                 "offset": 0,
                 "with": {},
