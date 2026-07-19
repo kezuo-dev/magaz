@@ -401,9 +401,10 @@ class OzonClient(MarketplaceClient):
     def fetch_orders(self) -> list[OrderInfo]:
         """Получить недавние отправления FBS. Каждый товар в заказе — проданная книга.
 
-        Ozon требует диапазон дат: без processed_at_from/processed_at_to метод
-        отвечает 400 «processed_at_to must be set». Берём окно последних дней —
-        свежие заказы для кросс-снятия, старые нам уже не нужны.
+        Ozon требует диапазон дат: у /v3/posting/fbs/list поля фильтра называются
+        since/to (ISO 8601). Без них метод отвечает 400 «processed_at_to must be
+        set» — это внутреннее имя Ozon, но в запросе ждёт именно since/to. Берём
+        окно последних дней: свежие заказы для кросс-снятия, старые не нужны.
         """
         from datetime import datetime, timedelta, timezone
 
@@ -417,8 +418,8 @@ class OzonClient(MarketplaceClient):
                 "dir": "DESC",
                 "filter": {
                     "status": "",
-                    "processed_at_from": since.strftime(fmt),
-                    "processed_at_to": now.strftime(fmt),
+                    "since": since.strftime(fmt),
+                    "to": now.strftime(fmt),
                 },
                 "limit": 100,
                 "offset": 0,
