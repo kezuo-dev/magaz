@@ -212,43 +212,58 @@ class OzonClient(MarketplaceClient):
 
         return PublishResult(external_id=offer_id, raw={"offer_id": offer_id})
 
-    def _wait_import(self, task_id, attempts: int = 10, delay: float = 1.5) -> None:
+    def _wait_import(self, task_id, attempts: int = 40, delay: float = 2.0) -> None:
         """Опрашивать статус задачи импорта, пока товар не будет создан.
 
         /v1/product/import/info по task_id возвращает статус каждой позиции.
         Ждём статус imported. Если Ozon вернул ошибки по товару — поднимаем их,
         чтобы причина попала в журнал (иначе остаток выставить всё равно нельзя).
+
+        Импорт Ozon бывает небыстрым (до минуты и дольше), поэтому ждём с запасом
+        (attempts × delay ≈ 80 c). Если так и не дождались — кладём в ошибку
+        последний статус и все замечания Ozon, чтобы была видна реальная причина,
+        а не общая фраза.
         """
         if not task_id:
             return
         import time
 
+        last_statuses: list = []
+        last_errors: list[str] = []
         for _ in range(attempts):
             info = self._post("/v1/product/import/info", {"task_id": task_id})
             items = (info.get("result") or {}).get("items") or []
-            statuses = [it.get("status") for it in items]
-            if items and all(s == "imported" for s in statuses):
+            last_statuses = [it.get("status") for it in items]
+
+            # Собираем замечания Ozon по всем позициям (не только failed): он
+            # иногда прикладывает причины ещё до перевода позиции в failed.
+            last_errors = []
+            for it in items:
+                for err in it.get("errors") or []:
+                    msg = err.get("message") or err.get("code") or ""
+                    if msg and msg not in last_errors:
+                        last_errors.append(msg)
+
+            if items and all(s == "imported" for s in last_statuses):
                 return
-            # Ozon помечает неудачные позиции статусом failed и кладёт причины.
-            failed = [it for it in items if it.get("status") == "failed"]
-            if failed:
-                errors = []
-                for it in failed:
-                    for err in it.get("errors") or []:
-                        msg = err.get("message") or err.get("code") or ""
-                        if msg:
-                            errors.append(msg)
-                detail = "; ".join(errors) or "Ozon отклонил карточку при импорте"
+            # Ozon помечает неудачные позиции статусом failed — это отказ, не ждём.
+            if any(s == "failed" for s in last_statuses):
+                detail = "; ".join(last_errors) or "Ozon отклонил карточку при импорте"
                 raise MarketplaceError(f"Импорт Ozon не прошёл: {detail}")
-            if items and all(s == "pending" for s in statuses):
-                time.sleep(delay)
-                continue
             time.sleep(delay)
-        # Не дождались — не роняем публикацию, но остаток может не выставиться.
-        raise MarketplaceError(
-            "Ozon не подтвердил создание карточки за отведённое время. "
-            "Проверьте товар в ЛК и выставьте повторно."
+
+        # Не дождались за отведённое время. Показываем, на чём застряло.
+        status_text = ", ".join(str(s) for s in last_statuses) or "неизвестно"
+        detail = "; ".join(last_errors)
+        msg = (
+            f"Ozon не подтвердил создание карточки за отведённое время "
+            f"(статус: {status_text})."
         )
+        if detail:
+            msg += f" Замечания Ozon: {detail}."
+        else:
+            msg += " Проверьте товар в ЛК и выставьте повторно."
+        raise MarketplaceError(msg)
 
     def _build_attributes(self, book) -> list[dict]:
         """Собрать массив обязательных атрибутов книжной карточки Ozon.
