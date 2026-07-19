@@ -95,6 +95,30 @@ def main() -> None:
     print("\n--- Полный ответ Ozon (для разбора) ---")
     print(json.dumps(result, ensure_ascii=False, indent=2)[:4000])
 
+    # Обязательные атрибуты для этой категории+типа: сверяем с тем, что шлём.
+    # Валидация Ozon падает с INTERNAL_OFFER_VALIDATION чаще всего из-за
+    # незаполненного обязательного атрибута — вот полный их список.
+    cat_id = result.get("description_category_id")
+    type_id = result.get("type_id")
+    print(f"\n=== Обязательные атрибуты категории {cat_id}, типа {type_id} ===")
+    try:
+        attr_data = client._post(
+            "/v1/description-category/attribute",
+            {"description_category_id": int(cat_id), "type_id": int(type_id)},
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Не удалось получить список атрибутов: {exc}")
+        return
+
+    attrs = attr_data.get("result") or []
+    required = [a for a in attrs if a.get("is_required")]
+    print(f"Всего атрибутов: {len(attrs)}, обязательных: {len(required)}\n")
+    print("--- ОБЯЗАТЕЛЬНЫЕ атрибуты (id — имя) ---")
+    for a in required:
+        aspect = " [aspect]" if a.get("is_aspect") else ""
+        dic = f" словарь={a.get('dictionary_id')}" if a.get("dictionary_id") else ""
+        print(f"  {a.get('id')} — {a.get('name')}{aspect}{dic}")
+
 
 if __name__ == "__main__":
     main()
