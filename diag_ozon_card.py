@@ -13,16 +13,15 @@ import json
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import MarketplaceAccount
+from app.models import Book, Listing, MarketplaceAccount
 from app.security import decrypt_credentials
 from app.marketplaces.ozon import OzonClient
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("Укажите offer_id (SKU) книги: python diag_ozon_card.py <SKU>")
-        return
-    offer_id = sys.argv[1]
+    # SKU можно передать аргументом; если не передан (кириллицу в консоли вводить
+    # неудобно) — берём последнюю книгу с лотом на Ozon из базы.
+    offer_id = sys.argv[1] if len(sys.argv) >= 2 else None
 
     with SessionLocal() as db:
         acc = db.scalar(
@@ -32,6 +31,20 @@ def main() -> None:
             print("Ключи Ozon не сохранены в настройках.")
             return
         creds = decrypt_credentials(acc.credentials_encrypted)
+
+        if not offer_id:
+            listing = db.scalar(
+                select(Listing)
+                .where(Listing.marketplace == "ozon")
+                .order_by(Listing.id.desc())
+            )
+            if listing:
+                book = db.get(Book, listing.book_id)
+                offer_id = listing.external_id or (book.sku if book else None)
+
+    if not offer_id:
+        print("Не найдено книги с лотом на Ozon. Укажите SKU: python diag_ozon_card.py <SKU>")
+        return
 
     client = OzonClient(creds)
 
