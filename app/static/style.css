@@ -255,6 +255,8 @@ th.col-price { text-align: right; }
   background: rgba(23,26,43,.55); backdrop-filter: blur(3px);
   opacity: 0; transition: opacity .22s ease;
 }
+/* hidden должен реально прятать оверлей — иначе прозрачный слой ловит все клики. */
+.modal-overlay[hidden] { display: none; }
 .modal-overlay.show { opacity: 1; }
 .modal {
   position: relative; width: 100%; max-width: 440px;
