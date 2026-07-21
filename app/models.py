@@ -23,7 +23,6 @@ def utcnow() -> datetime:
 class Marketplace(str, Enum):
     OZON = "ozon"
     WB = "wildberries"
-    AVITO = "avito"
 
 
 class BookStatus(str, Enum):
@@ -36,7 +35,7 @@ class BookStatus(str, Enum):
 class ListingStatus(str, Enum):
     PENDING = "pending"        # запланировано, ещё не отправлено на площадку
     ACTIVE = "active"          # опубликовано и активно
-    WITHDRAWING = "withdrawing"  # снятие отправлено, ждём подтверждения (важно для Avito)
+    WITHDRAWING = "withdrawing"  # снятие отправлено, ждём подтверждения
     WITHDRAWN = "withdrawn"    # снято
     ERROR = "error"            # ошибка синхронизации, см. sync_log
 

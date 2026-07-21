@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Импорт завершён</h1></div>
+<div class="page-head"><h1>{% if via_api %}Сверка завершена{% else %}Импорт завершён{% endif %}</h1></div>
 <div class="result-box">
-  <p>Площадка: <b>{{ marketplace_label(marketplace) }}</b>{% if auto %} <span class="muted">(определена автоматически)</span>{% endif %}</p>
+  <p>Площадка: <b>{{ marketplace_label(marketplace) }}</b>{% if auto and not via_api %} <span class="muted">(определена автоматически)</span>{% endif %}</p>
   <ul>
     <li>Создано новых книг: <b>{{ created }}</b></li>
     <li>Обновлено существующих: <b>{{ updated }}</b></li>
+    {% if removed is defined %}<li>Снято пропавших с площадки: <b>{{ removed }}</b></li>{% endif %}
     <li>Пропущено (нет названия и SKU): <b>{{ skipped }}</b></li>
   </ul>
   <a href="/" class="btn">Открыть каталог</a>
-  <a href="/import" class="btn muted">Импортировать ещё</a>
+  <a href="/import" class="btn muted">Сверить ещё</a>
 </div>
 {% endblock %}

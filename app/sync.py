@@ -1,13 +1,15 @@
 """Сервис синхронизации каталога с площадками.
 
 Здесь собрано всё, что «ходит наружу» из бизнес-логики:
-- publish_book / withdraw_book — выставить/снять одну книгу на одной площадке;
+- withdraw_book — снять одну книгу с одной площадки;
 - withdraw_book_everywhere — снять книгу со всех площадок (для авто-снятия);
 - poll_marketplace_orders — опрос заказов и обработка продаж (кросс-снятие).
 
+Выставление книг убрано: программа только отслеживает каталог площадок и снимает
+проданное. Наполнение каталога идёт сверкой (см. app/catalog_sync.py).
+
 Правило деградации: если аккаунт площадки выключен или ключи не заданы, живого
 вызова API не делаем — только меняем локальный статус лота и пишем это в журнал.
-Так интерфейс полностью рабочий ещё до подключения реальных ключей.
 """
 from __future__ import annotations
 
@@ -58,49 +60,6 @@ def _get_active_client(db: Session, marketplace: str):
         return get_client(marketplace, creds)
     except (MarketplaceError, Exception):
         return None
-
-
-def _get_or_create_listing(db: Session, book: Book, marketplace: str) -> Listing:
-    listing = next((l for l in book.listings if l.marketplace == marketplace), None)
-    if listing is None:
-        listing = Listing(book_id=book.id, marketplace=marketplace, status=ListingStatus.PENDING)
-        db.add(listing)
-        book.listings.append(listing)
-    return listing
-
-
-def publish_book(db: Session, book: Book, marketplace: str) -> bool:
-    """Выставить книгу на площадку. Возвращает True при успехе живого вызова.
-
-    Если площадка выключена — помечаем лот ACTIVE локально и возвращаем False
-    (никакого сетевого вызова не было).
-    """
-    listing = _get_or_create_listing(db, book, marketplace)
-    client = _get_active_client(db, marketplace)
-
-    if client is None:
-        listing.status = ListingStatus.ACTIVE
-        listing.last_error = None
-        listing.last_synced_at = utcnow()
-        _log(db, marketplace=marketplace, action="publish", ok=True, book_id=book.id,
-             message="Локально (площадка выключена): лот отмечен активным")
-        return False
-
-    try:
-        result = client.publish(book)
-        listing.external_id = result.external_id or listing.external_id
-        listing.status = ListingStatus.ACTIVE
-        listing.last_error = None
-        listing.last_synced_at = utcnow()
-        _log(db, marketplace=marketplace, action="publish", ok=True, book_id=book.id,
-             message=f"Выставлено на {marketplace}, лот {listing.external_id}")
-        return True
-    except MarketplaceError as exc:
-        listing.status = ListingStatus.ERROR
-        listing.last_error = str(exc)
-        _log(db, marketplace=marketplace, action="publish", ok=False, book_id=book.id,
-             message=str(exc))
-        return False
 
 
 def withdraw_book(db: Session, book: Book, marketplace: str) -> bool:

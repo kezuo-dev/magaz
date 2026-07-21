@@ -5,12 +5,11 @@
 продавца: Профиль → Настройки → Доступ к API). Токен храним шифрованно.
 
 WB разнёс методы по нескольким доменам:
-- content-api  — карточки товаров (создание/поиск);
-- discounts-prices-api — цены;
+- content-api  — карточки товаров (выгрузка каталога);
 - marketplace-api — остатки на складах FBS и заказы (сборочные задания).
 
-Книги б/у в единственном экземпляре: остаток всегда 1 (или 0 при снятии).
-SKU книги используем как vendorCode — это наш артикул на стороне WB.
+Книги б/у в единственном экземпляре. SKU книги = vendorCode на стороне WB.
+Программа только отслеживает каталог и снимает проданное (обнуляет остаток).
 """
 from __future__ import annotations
 
@@ -20,12 +19,9 @@ from app.marketplaces.base import (
     MarketplaceClient,
     MarketplaceError,
     OrderInfo,
-    PublishResult,
 )
-from app.photos import public_photo_list
 
 CONTENT_URL = "https://content-api.wildberries.ru"
-PRICES_URL = "https://discounts-prices-api.wildberries.ru"
 MARKETPLACE_URL = "https://marketplace-api.wildberries.ru"
 TIMEOUT = 30.0
 
@@ -38,12 +34,9 @@ class WBClient(MarketplaceClient):
         self.token = str(credentials.get("api_token", "")).strip()
         if not self.token:
             raise MarketplaceError("Не задан API-токен для Wildberries")
-        # Склад FBS, куда пишем остатки. Необязателен: если не задан, остатки
-        # не трогаем (карточка всё равно создаётся).
+        # Склад FBS, откуда читаем остатки и куда пишем 0 при снятии. Необязателен:
+        # если не задан, остатки не трогаем.
         self.warehouse_id = str(credentials.get("warehouse_id", "")).strip()
-        # ID предмета «Книги». WB требует его при создании карточки (subjectID > 0).
-        # Для магазина книг это одно значение на все товары — задаётся в настройках.
-        self.subject_id = str(credentials.get("subject_id", "")).strip()
 
     # --- инфраструктура ---------------------------------------------------
 
@@ -97,104 +90,12 @@ class WBClient(MarketplaceClient):
             {"settings": {"cursor": {"limit": 1}, "filter": {"withPhoto": -1}}},
         )
 
-    def fetch_categories(self, query: str = "") -> list[dict]:
-        """Справочник предметов WB → список вариантов с subjectID.
-
-        WB отдаёт предметы через /content/v2/object/all (можно искать по name).
-        По умолчанию подсказываем предметы со словом «книг».
-        """
-        params = {"limit": 1000, "locale": "ru"}
-        # Пустой поиск заменяем на «книг» — для магазина книг это нужный раздел.
-        params["name"] = (query or "книг").strip()
-        data = self._request(
-            "GET",
-            f"{CONTENT_URL}/content/v2/object/all",
-            params=params,
-        )
-        subjects = data.get("data") or []
-        out: list[dict] = []
-        for subj in subjects:
-            subject_id = subj.get("subjectID") or subj.get("subjectId")
-            name = subj.get("subjectName") or subj.get("name") or ""
-            parent = subj.get("parentName") or ""
-            if not subject_id:
-                continue
-            label = f"{parent} → {name}" if parent else name
-            out.append(
-                {
-                    "label": label,
-                    "fields": {"subject_id": str(subject_id)},
-                }
-            )
-        out.sort(key=lambda o: (0 if "книг" in o["label"].lower() else 1, o["label"]))
-        return out
-
-    def publish(self, book) -> PublishResult:
-        """Создать/обновить карточку товара и выставить остаток 1.
-
-        WB, как и Ozon, обрабатывает карточки асинхронно: /content/v2/cards/upload
-        ставит задачу. vendorCode (наш SKU) сразу известен и служит внешним
-        идентификатором лота.
-        """
-        vendor_code = book.sku
-        price = int(book.price) if book.price is not None else 0
-        quantity = int(getattr(book, "quantity", 1) or 1)
-
-        # Предмет теперь задаётся у самой книги (подбирается в карточке).
-        # На старых настройках значение могло лежать в ключах — берём как запас.
-        subject_id = str(getattr(book, "wb_subject_id", "") or "").strip() or self.subject_id
-
-        # Без предмета WB отклоняет карточку (subjectID is not provided or zero).
-        if not subject_id:
-            raise MarketplaceError(
-                "Для публикации на Wildberries укажите в карточке книги предмет «Книги»"
-            )
-
-        # Реальный ISBN используем как баркод (sku); «нет»/пусто — без баркода.
-        barcode = book.isbn if book.isbn and book.isbn != "нет" else None
-
-        card = {
-            "vendorCode": vendor_code,
-            "title": book.title,
-            # Книги б/у не имеют размеров; WB требует хотя бы один размер с ценой.
-            "sizes": [{"price": price, "skus": [barcode] if barcode else []}],
-        }
-        if book.description:
-            card["description"] = book.description
-        if book.publisher:
-            card["brand"] = book.publisher
-        # WB тоже скачивает фото по ссылке — нужен абсолютный URL с хостом.
-        images = public_photo_list(book)
-        if images:
-            card["photos"] = [{"url": u} for u in images]
-
-        # WB группирует карточки по предметам; для книг отправляем одиночную группу.
-        self._post(
-            f"{CONTENT_URL}/content/v2/cards/upload",
-            [{"subjectID": int(subject_id), "variants": [card]}],
-        )
-
-        # Цену выставляем отдельно (на случай, если карточка уже существует).
-        self._set_price(vendor_code, price)
-        # И остаток на складе FBS, если склад задан.
-        self._set_stock(barcode or vendor_code, quantity)
-
-        return PublishResult(external_id=vendor_code, raw={"vendorCode": vendor_code})
-
     def withdraw(self, listing) -> None:
         """Снять лот с продажи — обнуляем остаток на складе FBS."""
         sku = listing.external_id
         if not sku:
             raise MarketplaceError("У лота Wildberries нет vendorCode — нечего снимать")
         self._set_stock(sku, 0)
-
-    def _set_price(self, vendor_code: str, price: int) -> None:
-        if price <= 0:
-            return
-        self._post(
-            f"{PRICES_URL}/api/v2/upload/task",
-            {"data": [{"vendorCode": vendor_code, "price": price}]},
-        )
 
     def _set_stock(self, sku: str, stock: int) -> None:
         # Без склада FBS остатки WB не принимает — тихо пропускаем.

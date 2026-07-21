@@ -2,15 +2,13 @@
 
 Фабрика get_client() отдаёт нужный клиент по названию площадки и расшифрованным
 ключам. Наружу (в sync.py и планировщик) уходит только базовый интерфейс —
-поэтому подключение WB и Avito не требует правок в вызывающем коде.
+поэтому подключение новых площадок не требует правок в вызывающем коде.
 """
 from app.marketplaces.base import (
     MarketplaceClient,
     MarketplaceError,
     OrderInfo,
-    PublishResult,
 )
-from app.marketplaces.avito import AvitoClient
 from app.marketplaces.ozon import OzonClient
 from app.marketplaces.wildberries import WBClient
 
@@ -18,7 +16,6 @@ from app.marketplaces.wildberries import WBClient
 _CLIENTS: dict[str, type[MarketplaceClient]] = {
     "ozon": OzonClient,
     "wildberries": WBClient,
-    "avito": AvitoClient,
 }
 
 
@@ -38,10 +35,8 @@ __all__ = [
     "MarketplaceClient",
     "MarketplaceError",
     "OrderInfo",
-    "PublishResult",
     "OzonClient",
     "WBClient",
-    "AvitoClient",
     "get_client",
     "is_supported",
 ]

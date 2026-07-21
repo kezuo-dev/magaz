@@ -15,6 +15,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 
 from app.archive import sweep_to_archive
+from app.catalog_sync import sync_all
 from app.config import settings
 from app.db import SessionLocal
 from app.models import MarketplaceAccount
@@ -53,6 +54,25 @@ def poll_all_marketplaces() -> None:
         db.close()
 
 
+def sync_all_catalogs() -> None:
+    """Один проход полной сверки каталога по всем включённым площадкам.
+
+    Тяжелее опроса заказов (тянет все карточки), поэтому идёт по своему, более
+    редкому интервалу. Ловит снятия/пропажи, не пришедшие через заказы, и
+    кросс-снимает их. sync_all сам коммитит и не роняет планировщик на сбое.
+    """
+    db = SessionLocal()
+    try:
+        results = sync_all(db)
+        if results:
+            logger.info("Сверка каталога: %s", results)
+    except Exception:  # noqa: BLE001 — сбой сверки не должен ронять планировщик
+        db.rollback()
+        logger.exception("Сбой полной сверки каталога")
+    finally:
+        db.close()
+
+
 def start_scheduler() -> None:
     global _scheduler
     if not settings.scheduler_enabled or _scheduler is not None:
@@ -66,8 +86,20 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    _scheduler.add_job(
+        sync_all_catalogs,
+        trigger="interval",
+        minutes=settings.catalog_sync_interval_minutes,
+        id="catalog_sync",
+        max_instances=1,
+        coalesce=True,
+    )
     _scheduler.start()
-    logger.info("Планировщик запущен: опрос каждые %s мин", settings.poll_interval_minutes)
+    logger.info(
+        "Планировщик запущен: опрос заказов каждые %s мин, сверка каталога каждые %s мин",
+        settings.poll_interval_minutes,
+        settings.catalog_sync_interval_minutes,
+    )
 
 
 def stop_scheduler() -> None:

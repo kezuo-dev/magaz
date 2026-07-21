@@ -3,12 +3,16 @@
 <div class="page-head">
   <h1>Каталог <span class="muted">({{ total }} книг)</span></h1>
   <div class="head-actions">
+    <form method="post" action="/import/sync" class="inline-form js-loading-form">
+      <button type="submit" data-loading-text="Сверяем каталог…">🔄 Обновить каталог</button>
+    </form>
     <button type="button" class="danger" onclick="document.getElementById('wipe-box').hidden = false">Очистить каталог</button>
   </div>
 </div>
 
 {% if wiped %}<div class="notice ok">Каталог полностью очищен.</div>{% endif %}
 {% if wipe_error %}<div class="notice err">Неверный пароль. Каталог не тронут.</div>{% endif %}
+{% if synced %}<div class="notice ok">Каталог сверен с площадками: {{ synced }}</div>{% endif %}
 
 <div id="wipe-box" class="wipe-box" hidden>
   <form method="post" action="/catalog/wipe" onsubmit="return confirm('Удалить ВСЕ книги, лоты и заказы из программы без возможности восстановления?\n\nНа Ozon и других площадках товары НЕ будут затронуты.')">
@@ -42,18 +46,9 @@
 <form method="post" action="/books/bulk">
   <div class="bulk-bar">
     <label>С отмеченными:</label>
-    <button type="submit" name="action" value="publish" data-confirm="Выставить отмеченные книги на площадки?">Выставить</button>
-    <button type="submit" name="action" value="withdraw" data-confirm="Снять отмеченные книги с продажи?">Снять</button>
+    <button type="submit" name="action" value="withdraw" data-confirm="Снять отмеченные книги с продажи на всех площадках?">Снять</button>
     <button type="submit" name="action" value="mark_sold" class="danger" data-confirm="Отметить отмеченные книги проданными? Они будут сняты со всех площадок.">Отметить проданными</button>
     <button type="submit" name="action" value="archive" class="secondary" data-confirm="Убрать отмеченные книги в архив сейчас, не дожидаясь автопереноса?">В архив</button>
-  </div>
-
-  <div class="mp-picker">
-    <span class="mp-picker-label">Площадки для «Выставить» / «Снять»:</span>
-    <label class="mp-chip"><input type="checkbox" id="mp-all" checked> Все</label>
-    {% for m in marketplaces %}
-    <label class="mp-chip"><input type="checkbox" class="mp-target" name="targets" value="{{ m.value }}"> {{ marketplace_label(m.value) }}</label>
-    {% endfor %}
   </div>
 
   <table class="grid">
@@ -95,27 +90,6 @@
 </form>
 
 <script>
-  // Выбор площадок: «Все» и отдельные площадки взаимно исключают друг друга.
-  // Пусто (только «Все») = действовать на всех — так это и уходит на сервер.
-  const mpAll = document.getElementById("mp-all");
-  const mpTargets = document.querySelectorAll(".mp-target");
-  function syncAllFromTargets() {
-    const anyPicked = Array.from(mpTargets).some(cb => cb.checked);
-    mpAll.checked = !anyPicked;
-  }
-  mpAll.addEventListener("change", function () {
-    if (this.checked) {
-      mpTargets.forEach(cb => (cb.checked = false));
-    } else if (!Array.from(mpTargets).some(cb => cb.checked)) {
-      // Нельзя снять «Все», не выбрав ничего другого — возвращаем галочку.
-      this.checked = true;
-    }
-  });
-  mpTargets.forEach(cb => cb.addEventListener("change", function () {
-    if (this.checked) mpAll.checked = false;
-    else syncAllFromTargets();
-  }));
-
   // Подтверждение массовых действий + защита от пустого выбора.
   for (const btn of document.querySelectorAll(".bulk-bar button[data-confirm]")) {
     btn.addEventListener("click", function (e) {
@@ -125,16 +99,20 @@
         alert("Сначала отметьте книги галочками.");
         return;
       }
-      // Для «Выставить»/«Снять» уточняем область площадок в подтверждении.
-      let scope = "";
-      const act = this.value;
-      if (act === "publish" || act === "withdraw") {
-        const picked = Array.from(mpTargets).filter(cb => cb.checked).map(cb => cb.parentNode.textContent.trim());
-        scope = "\nПлощадки: " + (picked.length ? picked.join(", ") : "все");
-      }
-      if (!confirm(this.dataset.confirm + "\nОтмечено книг: " + checked + scope)) {
+      if (!confirm(this.dataset.confirm + "\nОтмечено книг: " + checked)) {
         e.preventDefault();
       }
+    });
+  }
+
+  // Кнопка «Обновить каталог» может идти долго — показываем спиннер.
+  for (const form of document.querySelectorAll(".js-loading-form")) {
+    form.addEventListener("submit", function () {
+      const btn = form.querySelector("button[type=submit]");
+      if (!btn) return;
+      btn.disabled = true;
+      const text = btn.dataset.loadingText || "Загружаем…";
+      btn.textContent = text;
     });
   }
 </script>

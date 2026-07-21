@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Импорт каталога</h1></div>
+<div class="page-head"><h1>Обновление каталога</h1></div>
 
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
-<h2>Загрузить из площадки</h2>
-<p class="muted">Заберём весь каталог напрямую по API, без файлов. Кнопка активна, если площадка
-включена и ключи заданы в Настройках. Повторная загрузка дополнит книги по SKU или ISBN, а не
-создаст дубли.</p>
+<h2>Сверить с площадкой</h2>
+<p class="muted">Заберём весь каталог напрямую по API и обновим: добавим новые книги, а пропавшие
+(проданные/снятые) снимем со всех площадок. Кнопка активна, если площадка включена и ключи заданы
+в Настройках.</p>
 
 <div class="settings-grid">
   {% for src in sources %}
@@ -16,23 +16,24 @@
       <h2>{{ marketplace_label(src.marketplace) }}</h2>
     </div>
     {% if src.ready %}
-    <p class="muted">Площадка подключена. Заберём весь каталог по сохранённым ключам.</p>
+    <p class="muted">Площадка подключена. Сверим весь каталог по сохранённым ключам.</p>
     <form method="post" action="/import/pull/{{ src.marketplace }}" class="import-source-action js-loading-form">
-      <button type="submit" data-loading-text="Загружаем каталог…">Загрузить из {{ marketplace_label(src.marketplace) }}</button>
+      <button type="submit" data-loading-text="Сверяем каталог…">Сверить {{ marketplace_label(src.marketplace) }}</button>
     </form>
     {% else %}
     <p class="muted">Включите площадку и введите ключи в <a href="/settings">Настройках</a>.</p>
     <div class="import-source-action">
-      <button type="button" disabled>Загрузить из {{ marketplace_label(src.marketplace) }}</button>
+      <button type="button" disabled>Сверить {{ marketplace_label(src.marketplace) }}</button>
     </div>
     {% endif %}
   </div>
   {% endfor %}
 </div>
 
-<h2 style="margin-top:2rem;">Импорт файлом</h2>
+<h2 style="margin-top:2rem;">Загрузить из файла</h2>
 <p class="muted">Если каталог удобнее взять из выгрузки — выберите файл (CSV или XLSX) и нажмите
-«Импортировать». Площадку и колонки распознаем автоматически.</p>
+«Импортировать». Площадку и колонки распознаем автоматически. Файл только добавляет/обновляет книги
+и не снимает отсутствующие (для полной сверки используйте кнопки выше).</p>
 
 <form method="post" action="/import/upload" enctype="multipart/form-data" class="book-form js-loading-form">
   <label>Файл выгрузки (.csv, .xlsx)

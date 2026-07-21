@@ -8,44 +8,22 @@
 """
 import csv
 import io
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.catalog_sync import TARGET_FIELDS, sync_all, sync_marketplace, upsert_catalog_rows
 from app.db import get_db
-from app.marketplaces import MarketplaceError, get_client, is_supported
-from app.models import (
-    Book,
-    BookStatus,
-    Listing,
-    ListingStatus,
-    Marketplace,
-    MarketplaceAccount,
-    SyncLog,
-    utcnow,
-)
-from app.security import decrypt_credentials
+from app.marketplaces import MarketplaceError, is_supported
+from app.models import Marketplace, MarketplaceAccount, SyncLog
 from app.templating import templates
 
 router = APIRouter(prefix="/import")
 
-# Поля книги, на которые можно сопоставлять колонки файла.
-TARGET_FIELDS = {
-    "sku": "Артикул (SKU)",
-    "title": "Название",
-    "author": "Автор",
-    "isbn": "ISBN",
-    "publisher": "Издательство",
-    "year": "Год",
-    "condition": "Состояние",
-    "price": "Цена",
-    "description": "Описание",
-    "external_id": "ID лота на площадке",
-}
-
-# Словарь автосопоставления: какие заголовки колонок в выгрузках Ozon/WB/Avito
+# Словарь автосопоставления: какие заголовки колонок в выгрузках Ozon/WB
 # соответствуют полям книги. Сравниваем по подстроке в нижнем регистре, поэтому
 # хватает характерных кусков названий ("артикул", "цена", "штрихкод" и т.д.).
 # Порядок важен: первое совпадение выигрывает.
@@ -72,7 +50,6 @@ COLUMN_ALIASES = {
 MARKETPLACE_HINTS = {
     "ozon": ["ozon", "offer_id", "артикул ozon", "fbo", "fbs"],
     "wildberries": ["wildberries", "wb", "номенклатура", "предмет", "баркод"],
-    "avito": ["avito", "авито", "avitoid", "объявление"],
 }
 
 
@@ -174,10 +151,10 @@ def import_start(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/pull/{marketplace}", response_class=HTMLResponse)
 def import_pull(marketplace: str, request: Request, db: Session = Depends(get_db)):
-    """Загрузить каталог напрямую из API площадки по сохранённым ключам.
+    """Полная сверка каталога одной площадки по сохранённым ключам.
 
-    Клиент возвращает уже нормализованные строки (ключи = поля книги), поэтому
-    прогоняем их через тот же _do_import с тождественным сопоставлением.
+    Тянет каталог, апсертит книги и снимает пропавшее (кросс-снятие). Это та же
+    операция, что и фоновая сверка, но запущенная вручную по конкретной площадке.
     """
     def fail(msg: str):
         db.add(SyncLog(marketplace=marketplace, action="import_pull", ok=False, message=msg))
@@ -192,32 +169,39 @@ def import_pull(marketplace: str, request: Request, db: Session = Depends(get_db
     if not is_supported(marketplace):
         return fail(f"Площадка «{marketplace}» не поддерживает загрузку по API")
 
-    account = db.scalar(
-        select(MarketplaceAccount).where(MarketplaceAccount.marketplace == marketplace)
-    )
-    if not account or not account.enabled or not account.credentials_encrypted:
-        return fail("Площадка выключена или ключи не заданы — включите её в Настройках")
-
     try:
-        creds = decrypt_credentials(account.credentials_encrypted)
-        client = get_client(marketplace, creds)
-        rows = client.fetch_catalog()
+        result = sync_marketplace(db, marketplace)
+        db.commit()
     except MarketplaceError as exc:
-        return fail(f"Не удалось загрузить каталог: {exc}")
+        return fail(f"Не удалось сверить каталог: {exc}")
     except Exception as exc:  # noqa: BLE001 — любой сбой показываем как есть
-        return fail(f"Ошибка загрузки: {exc}")
+        db.rollback()
+        return fail(f"Ошибка сверки: {exc}")
 
-    if not rows:
-        return fail("Площадка вернула пустой каталог")
-
-    # Строки уже нормализованы клиентом — сопоставление тождественное.
-    mapping = {field: field for field in TARGET_FIELDS}
-    result = _do_import(db, marketplace, rows, mapping)
     return templates.TemplateResponse(
         request,
         "import_done.html",
         {**result, "marketplace": marketplace, "auto": True, "via_api": True},
     )
+
+
+@router.post("/sync")
+def import_sync(request: Request, db: Session = Depends(get_db)):
+    """Кнопка «Обновить каталог»: полная сверка всех включённых площадок сразу."""
+    results = sync_all(db)
+    if not results:
+        return RedirectResponse("/?synced=" + quote("нет включённых площадок"), status_code=303)
+
+    parts = []
+    for mp, res in results.items():
+        if "error" in res:
+            parts.append(f"{mp}: ошибка")
+        else:
+            parts.append(
+                f"{mp}: +{res['created']} новых, {res['updated']} обновлено, "
+                f"{res['removed']} снято"
+            )
+    return RedirectResponse("/?synced=" + quote("; ".join(parts)), status_code=303)
 
 
 def _sources(db: Session) -> list[dict]:
@@ -331,100 +315,21 @@ async def import_run(request: Request, db: Session = Depends(get_db)):
 
 
 def _do_import(db: Session, marketplace: str, rows: list[dict], mapping: dict) -> dict:
-    """Создать/обновить книги по строкам выгрузки и сопоставлению колонок.
+    """Импорт из файла: апсерт книг без сверки пропавших.
 
-    Возвращает {created, updated, skipped}. Логику вынесли отдельно, чтобы её
-    делили автоматический (одним кликом) и ручной пути импорта.
+    В отличие от полной сверки по API, файл может быть частичной выгрузкой,
+    поэтому НЕ снимаем книги, которых в файле нет (reconcile не запускаем).
+    Общий апсерт живёт в catalog_sync.upsert_catalog_rows.
     """
-    created = updated = skipped = 0
-    for row in rows:
-        def val(field: str):
-            col = mapping.get(field)
-            v = row.get(col) if col else None
-            return str(v).strip() if v not in (None, "") else None
-
-        sku = val("sku")
-        isbn = val("isbn")
-        title = val("title")
-        if not title and not sku:
-            skipped += 1
-            continue
-
-        # Ищем существующую книгу по SKU, затем по ISBN — чтобы не плодить дубли между площадками.
-        book = None
-        if sku:
-            book = db.scalar(select(Book).where(Book.sku == sku))
-        if not book and isbn:
-            book = db.scalar(select(Book).where(Book.isbn == isbn))
-
-        # Остаток на площадке (если клиент его отдал). 0 — товара нет в наличии.
-        raw_stock = row.get("stock")
-        stock = None
-        if raw_stock not in (None, ""):
-            try:
-                stock = int(float(str(raw_stock).strip().replace(",", ".")))
-            except (ValueError, TypeError):
-                stock = None
-        out_of_stock = stock is not None and stock <= 0
-
-        if book:
-            updated += 1
-        else:
-            book = Book(sku=sku or f"AUTO-{isbn or title[:20]}")
-            book.status = BookStatus.IN_STOCK
-            db.add(book)
-            created += 1
-
-        # Нет в наличии (остаток 0) — сразу в архив как снятую с продажи.
-        # В наличии (остаток ≥1 или неизвестен) — остаётся в каталоге.
-        if out_of_stock:
-            book.status = BookStatus.WITHDRAWN
-            if book.removed_at is None:
-                book.removed_at = utcnow()
-            book.archived_at = utcnow()
-
-        # Заполняем только пустые поля, чтобы импорт со второй площадки не затирал данные.
-        book.title = book.title or title
-        book.author = book.author or val("author")
-        book.isbn = book.isbn or isbn
-        book.publisher = book.publisher or val("publisher")
-        book.condition = book.condition or val("condition")
-        if not book.description:
-            book.description = val("description")
-        year = val("year")
-        if year and year.isdigit() and not book.year:
-            book.year = int(year)
-        price = val("price")
-        if price and book.price is None:
-            try:
-                book.price = float(price.replace(",", "."))
-            except ValueError:
-                pass
-
-        db.flush()  # нужен book.id для лота
-
-        # Привязываем лот площадки, если его ещё нет. Нет в наличии — лот снят.
-        existing = next(
-            (l for l in book.listings if l.marketplace == marketplace), None
-        )
-        if not existing:
-            db.add(
-                Listing(
-                    book_id=book.id,
-                    marketplace=marketplace,
-                    external_id=val("external_id"),
-                    status=ListingStatus.WITHDRAWN if out_of_stock else ListingStatus.ACTIVE,
-                )
-            )
-
+    result = upsert_catalog_rows(db, marketplace, rows, mapping)
     db.add(
         SyncLog(
             marketplace=marketplace,
             action="import",
             ok=True,
-            message=f"Импорт: создано {created}, обновлено {updated}, пропущено {skipped}",
+            message=(f"Импорт файлом: создано {result['created']}, "
+                     f"обновлено {result['updated']}, пропущено {result['skipped']}"),
         )
     )
     db.commit()
-
-    return {"created": created, "updated": updated, "skipped": skipped}
+    return {"created": result["created"], "updated": result["updated"], "skipped": result["skipped"]}

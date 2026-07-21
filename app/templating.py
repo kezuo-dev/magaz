@@ -25,7 +25,6 @@ LISTING_STATUS_LABELS = {
 MARKETPLACE_LABELS = {
     "ozon": "Ozon",
     "wildberries": "Wildberries",
-    "avito": "Avito",
 }
 
 

@@ -27,11 +27,6 @@ CREDENTIAL_FIELDS = {
         ("api_token", "API-токен"),
         ("warehouse_id", "ID склада FBS (для остатков)"),
     ],
-    "avito": [
-        ("client_id", "Client ID"),
-        ("client_secret", "Client Secret"),
-        ("user_id", "User ID (номер профиля)"),
-    ],
 }
 
 

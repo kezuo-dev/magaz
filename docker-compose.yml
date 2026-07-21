@@ -28,7 +28,7 @@ services:
       # На сервере публичный адрес постоянный — туннель loca.lt не нужен.
       TUNNEL_ENABLED: "false"
     volumes:
-      # Загруженные фото и фиды Avito переживают перезапуск и пересборку образа.
+      # Загруженные фото переживают перезапуск и пересборку образа.
       - uploads_data:/app/app/static/uploads
       - feeds_data:/app/feeds
       # Папка data хранит ключ шифрования (fernet.key), если FERNET_KEY не задан
