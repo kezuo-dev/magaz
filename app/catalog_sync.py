@@ -1,16 +1,27 @@
 """Сверка каталога с площадками — сердце автоматики после отказа от выставления.
 
 Программа больше не выставляет книги, а отслеживает то, что реально есть на
-Ozon и WB, и снимает проданное. Наполнение и актуализация каталога идут отсюда:
+Ozon и WB, и снимает проданное. Три независимых механизма (см. scheduler.py):
 
-- upsert_catalog_rows — создать/обновить книги по строкам выгрузки (общий код для
-  импорта файлом и сверки по API);
-- reconcile_disappeared — найти книги, пропавшие с площадки (остаток 0 или карточки
-  больше нет), и снять их со ВСЕХ площадок (кросс-снятие) + запустить окно архива;
-- sync_marketplace / sync_all — полная сверка одной/всех включённых площадок.
+1. Опрос заказов (sync.poll_marketplace_orders, ~1 мин) — ловит продажи.
+2. Слежение за остатками (watch_stocks / watch_all_stocks, ~5 мин) — дёшево
+   спрашивает остатки НАШИХ книг по их ключам (без выгрузки всего каталога).
+   Остаток 0 или ключ пропал → книга снята → кросс-снятие. Главный «частый» канал.
+3. Полная сверка (sync_marketplace / sync_all, ~60 мин) — тянет весь каталог,
+   находит НОВЫЕ книги и снимает пропавшие. Авторитетная, но тяжёлая.
 
-Защита от ложных снятий: если площадка вернула пустой каталог (сбой сети/лимит),
-сверка НЕ трогает книги — иначе одна ошибка API сняла бы весь каталог.
+Функции наполнения/актуализации:
+- upsert_catalog_rows — создать/обновить книги по строкам выгрузки (общий код);
+- reconcile_disappeared — снять книги, пропавшие из ПОЛНОЙ выгрузки площадки;
+- watch_stocks — снять книги, у которых остаток по ключу упал до 0 / ключ исчез.
+
+Кросс-снятие всегда трогает ТОЛЬКО лоты своей площадки при выборке, а снимает с
+остальных через withdraw_book_everywhere. Книга, которой нет на площадке (только
+на Ozon или только на WB), чужим механизмом не затрагивается — выбор строго по
+marketplace.
+
+Защита от ложных снятий: пустой ответ каталога/остатков (сбой сети/лимит) НЕ
+трогает книги — иначе одна ошибка API сняла бы весь каталог.
 """
 from __future__ import annotations
 
@@ -60,6 +71,20 @@ def _parse_stock(raw) -> int | None:
         return None
 
 
+def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing) -> None:
+    """Единый путь снятия книги, пропавшей/проданной на площадке `marketplace`.
+
+    Помечаем лот этой площадки снятым (остатка там уже нет — живой вызов не нужен),
+    кросс-снимаем с остальных площадок и запускаем окно до архива.
+    """
+    listing.status = ListingStatus.WITHDRAWN
+    listing.last_synced_at = utcnow()
+    withdraw_book_everywhere(db, book, except_marketplace=marketplace)
+    if book.status == BookStatus.IN_STOCK:
+        book.status = BookStatus.WITHDRAWN
+    mark_removed(book)
+
+
 def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping: dict) -> dict:
     """Создать/обновить книги по строкам выгрузки и сопоставлению колонок.
 
@@ -94,6 +119,11 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
 
         stock = _parse_stock(row.get("stock"))
         out_of_stock = stock is not None and stock <= 0
+        # Ключ остатка на площадке (offer_id у Ozon, баркод у WB). Клиент кладёт
+        # его прямо в строку выгрузки (не через сопоставление колонок — при импорте
+        # файлом такой колонки нет). Пусто — оставим текущий/по внешнему id.
+        raw_key = row.get("stock_key")
+        stock_key = str(raw_key).strip() if raw_key not in (None, "") else None
 
         if book:
             updated += 1
@@ -130,23 +160,21 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
                 book_id=book.id,
                 marketplace=marketplace,
                 external_id=val("external_id"),
+                stock_key=stock_key,
                 status=ListingStatus.WITHDRAWN if out_of_stock else ListingStatus.ACTIVE,
             )
             db.add(listing)
             book.listings.append(listing)
-        elif val("external_id") and not listing.external_id:
-            listing.external_id = val("external_id")
+        else:
+            if val("external_id") and not listing.external_id:
+                listing.external_id = val("external_id")
+            # Ключ остатка держим в актуальном состоянии — по нему идёт слежение.
+            if stock_key:
+                listing.stock_key = stock_key
 
         if out_of_stock:
-            # Нет в наличии на площадке → снимаем и с других (кросс-снятие) и
-            # запускаем окно до архива. Живого вызова снятия для этой площадки не
-            # делаем — там и так остаток 0.
-            listing.status = ListingStatus.WITHDRAWN
-            listing.last_synced_at = utcnow()
-            withdraw_book_everywhere(db, book, except_marketplace=marketplace)
-            if book.status == BookStatus.IN_STOCK:
-                book.status = BookStatus.WITHDRAWN
-            mark_removed(book)
+            # Нет в наличии на площадке → снимаем и с других (кросс-снятие).
+            _cross_withdraw(db, book, marketplace, listing)
         else:
             listing.status = ListingStatus.ACTIVE
             listing.last_synced_at = utcnow()
@@ -185,14 +213,7 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
         if book.sku in live_skus:
             continue
 
-        # Пропала с площадки: снимаем локально этот лот (остатка там уже нет,
-        # живой вызов не нужен) и кросс-снимаем с остальных площадок.
-        listing.status = ListingStatus.WITHDRAWN
-        listing.last_synced_at = utcnow()
-        withdraw_book_everywhere(db, book, except_marketplace=marketplace)
-        if book.status == BookStatus.IN_STOCK:
-            book.status = BookStatus.WITHDRAWN
-        mark_removed(book)
+        _cross_withdraw(db, book, marketplace, listing)
         removed += 1
         _log(db, marketplace=marketplace, action="reconcile_removed", ok=True,
              message=f"Книга {book.sku} пропала с {marketplace} — снята со всех площадок")
@@ -259,6 +280,104 @@ def sync_all(db: Session) -> dict:
         except Exception as exc:  # noqa: BLE001 — сбой одной площадки не роняет сверку
             db.rollback()
             _log(db, marketplace=marketplace, action="catalog_sync", ok=False, message=str(exc))
+            db.commit()
+            out[marketplace] = {"error": str(exc)}
+    return out
+
+
+def _active_listings(db: Session, marketplace: str) -> list[Listing]:
+    """Активные лоты площадки с подгруженной книгой и её остальными лотами."""
+    return db.scalars(
+        select(Listing)
+        .options(selectinload(Listing.book).selectinload(Book.listings))
+        .where(
+            Listing.marketplace == marketplace,
+            Listing.status == ListingStatus.ACTIVE,
+        )
+    ).all()
+
+
+def watch_stocks(db: Session, marketplace: str) -> dict:
+    """Дёшево проверить остатки НАШИХ книг на площадке и снять обнулившиеся.
+
+    В отличие от полной сверки (тянет весь чужой каталог), спрашиваем остатки
+    ровно по ключам наших активных лотов — это ~1 запрос на 1000 книг. Механизм
+    частый (см. scheduler), поэтому продажа/снятие на площадке зеркалится на
+    другую почти сразу, даже между полными сверками.
+
+    Правило снятия: остаток по ключу == 0 ЛИБО площадка ключ не вернула (карточка
+    удалена/скрыта) → книга снята → кросс-снятие с остальных площадок.
+
+    Защита от ложного снятия: если площадка не вернула НИ ОДНОГО из запрошенных
+    ключей (похоже на сбой/лимит, а не на то, что разом продали весь склад) —
+    ничего не трогаем. Возвращает {checked, removed} либо {error}.
+    """
+    if not is_supported(marketplace):
+        return {"error": f"Площадка «{marketplace}» не поддерживается"}
+
+    account = db.scalar(
+        select(MarketplaceAccount).where(MarketplaceAccount.marketplace == marketplace)
+    )
+    if not account or not account.enabled or not account.credentials_encrypted:
+        return {"error": "Площадка выключена или ключи не заданы"}
+
+    listings = _active_listings(db, marketplace)
+    # Лоты, у которых есть ключ остатка. Без ключа проверить нечем — их обойдёт
+    # полная сверка. Один ключ может стоять у нескольких лотов — сгруппируем.
+    keyed = [l for l in listings if l.stock_key]
+    if not keyed:
+        return {"checked": 0, "removed": 0}
+
+    keys = sorted({l.stock_key for l in keyed})
+
+    creds = decrypt_credentials(account.credentials_encrypted)
+    client = get_client(marketplace, creds)
+    try:
+        stocks = client.fetch_stocks(keys)
+    except MarketplaceError as exc:
+        _log(db, marketplace=marketplace, action="watch_stocks", ok=False, message=str(exc))
+        return {"error": str(exc)}
+
+    # Защита: пустой ответ на непустой запрос — считаем сбоем, не снимаем.
+    if not stocks:
+        _log(db, marketplace=marketplace, action="watch_stocks", ok=False,
+             message="Пустой ответ по остаткам — слежение пропущено (защита от ложного снятия)")
+        return {"checked": len(keys), "removed": 0}
+
+    removed = 0
+    for listing in keyed:
+        book = listing.book
+        if book is None or book.archived_at is not None:
+            continue
+        # Ключ не вернулся (карточки нет) ИЛИ остаток обнулён — снимаем.
+        amount = stocks.get(listing.stock_key)
+        if amount is None or amount <= 0:
+            _cross_withdraw(db, book, marketplace, listing)
+            removed += 1
+            reason = "остаток 0" if amount is not None else "карточка пропала"
+            _log(db, marketplace=marketplace, action="watch_removed", ok=True,
+                 message=f"Книга {book.sku}: {reason} на {marketplace} — снята со всех площадок")
+
+    if removed:
+        _log(db, marketplace=marketplace, action="watch_stocks", ok=True,
+             message=f"Слежение за остатками: проверено {len(keys)}, снято {removed}")
+    return {"checked": len(keys), "removed": removed}
+
+
+def watch_all_stocks(db: Session) -> dict:
+    """Слежение за остатками по всем включённым площадкам. Сбой одной не роняет остальные."""
+    enabled = db.scalars(
+        select(MarketplaceAccount.marketplace).where(MarketplaceAccount.enabled == True)  # noqa: E712
+    ).all()
+
+    out: dict[str, dict] = {}
+    for marketplace in enabled:
+        try:
+            out[marketplace] = watch_stocks(db, marketplace)
+            db.commit()
+        except Exception as exc:  # noqa: BLE001 — сбой одной площадки не роняет слежение
+            db.rollback()
+            _log(db, marketplace=marketplace, action="watch_stocks", ok=False, message=str(exc))
             db.commit()
             out[marketplace] = {"error": str(exc)}
     return out

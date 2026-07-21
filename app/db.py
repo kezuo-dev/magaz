@@ -56,3 +56,14 @@ def ensure_schema() -> None:
         for column, ddl in additions.items():
             if column not in existing:
                 conn.execute(text(ddl))
+
+    # Колонки таблицы listings, появившиеся позже (слежение за остатками).
+    if "listings" in inspector.get_table_names():
+        listing_cols = {col["name"] for col in inspector.get_columns("listings")}
+        listing_additions = {
+            "stock_key": "ALTER TABLE listings ADD COLUMN stock_key VARCHAR(128)",
+        }
+        with engine.begin() as conn:
+            for column, ddl in listing_additions.items():
+                if column not in listing_cols:
+                    conn.execute(text(ddl))

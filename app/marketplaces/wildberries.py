@@ -13,6 +13,8 @@ WB разнёс методы по нескольким доменам:
 """
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from app.marketplaces.base import (
@@ -24,6 +26,10 @@ from app.marketplaces.base import (
 CONTENT_URL = "https://content-api.wildberries.ru"
 MARKETPLACE_URL = "https://marketplace-api.wildberries.ru"
 TIMEOUT = 30.0
+# Устойчивость к лимитам WB: на 429 и 5xx повторяем с нарастающей паузой.
+RETRY_STATUSES = (429, 500, 502, 503, 504)
+MAX_RETRIES = 4
+RETRY_BACKOFF = 1.5  # секунды: 1.5, 3, 4.5, 6
 
 
 class WBClient(MarketplaceClient):
@@ -47,36 +53,49 @@ class WBClient(MarketplaceClient):
         }
 
     def _request(self, method: str, url: str, payload: dict | None = None, params: dict | None = None) -> dict:
-        """Запрос к WB с единой обработкой ошибок. Возвращает распарсенный JSON."""
-        try:
-            resp = httpx.request(
-                method, url, json=payload, params=params, headers=self._headers(), timeout=TIMEOUT
-            )
-        except httpx.HTTPError as exc:
-            raise MarketplaceError(f"Сеть Wildberries недоступна: {exc}") from exc
-
-        if resp.status_code in (401, 403):
-            raise MarketplaceError(
-                "Wildberries отклонил токен (401/403). Проверьте API-токен и его права"
-            )
-        if resp.status_code == 429:
-            raise MarketplaceError("Wildberries: превышен лимит запросов (429), повторите позже")
-        if resp.status_code >= 400:
-            detail = ""
+        """Запрос к WB с единой обработкой ошибок и ретраями. Возвращает JSON."""
+        last_exc: Exception | None = None
+        for attempt in range(MAX_RETRIES + 1):
             try:
-                body = resp.json()
-                # WB кладёт причину в errorText либо в errors.
-                detail = body.get("errorText") or body.get("error") or str(body.get("errors") or "")
-            except Exception:
-                detail = resp.text
-            raise MarketplaceError(f"Wildberries вернул {resp.status_code}: {detail or resp.text[:200]}")
+                resp = httpx.request(
+                    method, url, json=payload, params=params, headers=self._headers(), timeout=TIMEOUT
+                )
+            except httpx.HTTPError as exc:
+                last_exc = MarketplaceError(f"Сеть Wildberries недоступна: {exc}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF * (attempt + 1))
+                    continue
+                raise last_exc from exc
 
-        if not resp.content:
-            return {}
-        try:
-            return resp.json()
-        except Exception as exc:
-            raise MarketplaceError(f"Wildberries вернул не-JSON: {resp.text[:200]}") from exc
+            if resp.status_code in RETRY_STATUSES and attempt < MAX_RETRIES:
+                # Лимит (429) или временный сбой WB — ждём и повторяем.
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+                continue
+
+            if resp.status_code in (401, 403):
+                raise MarketplaceError(
+                    "Wildberries отклонил токен (401/403). Проверьте API-токен и его права"
+                )
+            if resp.status_code == 429:
+                raise MarketplaceError("Wildberries: превышен лимит запросов (429), повторите позже")
+            if resp.status_code >= 400:
+                detail = ""
+                try:
+                    body = resp.json()
+                    # WB кладёт причину в errorText либо в errors.
+                    detail = body.get("errorText") or body.get("error") or str(body.get("errors") or "")
+                except Exception:
+                    detail = resp.text
+                raise MarketplaceError(f"Wildberries вернул {resp.status_code}: {detail or resp.text[:200]}")
+
+            if not resp.content:
+                return {}
+            try:
+                return resp.json()
+            except Exception as exc:
+                raise MarketplaceError(f"Wildberries вернул не-JSON: {resp.text[:200]}") from exc
+
+        raise last_exc or MarketplaceError("Wildberries: превышено число повторов запроса (лимит/сбой)")
 
     def _post(self, url: str, payload: dict) -> dict:
         return self._request("POST", url, payload)
@@ -107,17 +126,18 @@ class WBClient(MarketplaceClient):
             {"stocks": [{"sku": sku, "amount": stock}]},
         )
 
-    def _fetch_stocks(self, skus: list[str]) -> dict[str, int]:
-        """Остатки FBS по баркодам (sku). Тот же метод складов, но POST-запросом.
+    def fetch_stocks(self, keys: list[str]) -> dict[str, int]:
+        """Остатки FBS по баркодам (ключам остатка). Возвращает {баркод: остаток}.
 
-        WB принимает до 1000 sku за раз, поэтому шлём батчами. Возвращаем
-        {sku: остаток}. Если склад не задан — остатки узнать неоткуда, {}.
+        Тот же метод складов WB, но POST-запросом. WB принимает до 1000 sku за раз,
+        поэтому шлём батчами. Если склад не задан — остатки узнать неоткуда, {}.
+        Дешёвая проверка «книга ещё в наличии?» без выгрузки всех карточек.
         """
         result: dict[str, int] = {}
-        if not self.warehouse_id or not skus:
+        if not self.warehouse_id or not keys:
             return result
-        for i in range(0, len(skus), 1000):
-            batch = skus[i:i + 1000]
+        for i in range(0, len(keys), 1000):
+            batch = keys[i:i + 1000]
             data = self._request(
                 "POST",
                 f"{MARKETPLACE_URL}/api/v3/stocks/{self.warehouse_id}",
@@ -156,6 +176,9 @@ class WBClient(MarketplaceClient):
                     {
                         "sku": card.get("vendorCode"),
                         "external_id": card.get("vendorCode"),
+                        # Остаток WB читается по баркоду (skus[0]), а не по vendorCode —
+                        # храним его как ключ остатка для слежения.
+                        "stock_key": barcode,
                         "title": card.get("title") or card.get("subjectName"),
                         "publisher": card.get("brand"),
                         "isbn": barcode,
@@ -179,7 +202,7 @@ class WBClient(MarketplaceClient):
         # Одним махом узнаём остатки FBS по всем баркодам и проставляем stock.
         # Нет склада/баркода → остаток неизвестен, оставляем None (импорт решит).
         barcodes = [r["_barcode"] for r in rows if r.get("_barcode")]
-        stocks = self._fetch_stocks(barcodes)
+        stocks = self.fetch_stocks(barcodes)
         for r in rows:
             bc = r.pop("_barcode", None)
             r["stock"] = stocks.get(bc) if bc else None

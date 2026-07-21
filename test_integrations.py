@@ -57,6 +57,7 @@ _fake_orders = {"postings": []}                  # заказы Ozon
 _fake_wb_orders = {"orders": []}                 # заказы WB
 _fake_ozon_list = {"items": [], "last_id": ""}   # /v3/product/list
 _fake_ozon_info = {"items": []}                  # /v3/product/info/list
+_fake_ozon_stocks = {"items": []}                # /v4/product/info/stocks
 _fake_wb_cards = []                              # карточки WB
 _fake_wb_stocks = []                            # остатки FBS WB: [{"sku","amount"}]
 
@@ -69,6 +70,8 @@ def fake_post(url, json=None, data=None, headers=None, timeout=None):
         return FakeResponse(200, {"result": _fake_ozon_list})
     if url.endswith("/v3/product/info/list"):
         return FakeResponse(200, {"result": _fake_ozon_info})
+    if url.endswith("/v4/product/info/stocks"):
+        return FakeResponse(200, {"result": _fake_ozon_stocks})
     if url.endswith("/v2/products/stocks"):
         return FakeResponse(200, {"result": [{"updated": True}]})
     if url.endswith("/v3/posting/fbs/list"):
@@ -327,6 +330,123 @@ with SessionLocal() as s:
     wb_l = s.query(Listing).filter_by(book_id=wb_only_id, marketplace="wildberries").one()
     assert wb_l.status == ListingStatus.ACTIVE, "лот WB тронут сверкой Ozon!"
 print("[ok] книга только на WB не затронута сверкой Ozon")
+
+
+# --- 9b. Слежение за остатками: заводим лоты с ключами через сверку ---------
+
+from app.catalog_sync import watch_stocks
+
+# Полная сверка проставляет stock_key лотам (Ozon: offer_id, WB: баркод).
+with SessionLocal() as s:
+    s.query(Order).delete()
+    s.query(Listing).delete()
+    s.query(Book).delete()
+    s.commit()
+
+_fake_ozon_list = {"items": [{"offer_id": "W-1"}, {"offer_id": "W-2"}], "last_id": ""}
+_fake_ozon_info = {"items": [
+    {"offer_id": "W-1", "name": "Следим 1", "price": "100", "barcode": "b1"},
+    {"offer_id": "W-2", "name": "Следим 2", "price": "100", "barcode": "b2"},
+]}
+_fake_wb_cards = [{"vendorCode": "W-1", "title": "Следим 1", "brand": "И",
+                   "sizes": [{"price": 100, "skus": ["wb-b1"]}]}]
+_fake_wb_stocks = [{"sku": "wb-b1", "amount": 5}]
+with SessionLocal() as s:
+    sync_marketplace(s, "ozon")
+    sync_marketplace(s, "wildberries")
+    s.commit()
+    # W-1 стоит на обеих площадках, W-2 — только на Ozon.
+    oz1 = s.query(Listing).filter_by(marketplace="ozon", external_id="W-1").one()
+    assert oz1.stock_key == "W-1", f"Ozon stock_key не проставлен: {oz1.stock_key}"
+    wb1 = s.query(Listing).filter_by(marketplace="wildberries", external_id="W-1").one()
+    assert wb1.stock_key == "wb-b1", f"WB stock_key (баркод) не проставлен: {wb1.stock_key}"
+print("[ok] сверка проставляет ключи остатка (Ozon offer_id, WB баркод)")
+
+# Слежение Ozon: у W-1 остаток стал 0 → снять её с обеих площадок; W-2 жива.
+_fake_ozon_stocks = {"items": [
+    {"offer_id": "W-1", "stocks": [{"present": 0}]},
+    {"offer_id": "W-2", "stocks": [{"present": 3}]},
+]}
+with SessionLocal() as s:
+    res = watch_stocks(s, "ozon")
+    s.commit()
+    assert res["removed"] == 1, f"ожидали снятие 1 по остатку, {res}"
+with SessionLocal() as s:
+    b1 = s.query(Book).filter_by(sku="W-1").one()
+    assert b1.status == BookStatus.WITHDRAWN, "W-1 не снята по нулевому остатку"
+    # Кросс-снятие: лот на WB тоже снят.
+    wb1 = s.query(Listing).filter_by(marketplace="wildberries", external_id="W-1").one()
+    assert wb1.status == ListingStatus.WITHDRAWN, "W-1 не снята с WB (кросс-снятие)"
+    b2 = s.query(Book).filter_by(sku="W-2").one()
+    assert b2.status == BookStatus.IN_STOCK, "W-2 ошибочно снята"
+print("[ok] слежение за остатками: остаток 0 -> снятие с обеих площадок, живая цела")
+
+# Слежение Ozon: W-2 пропала из ответа остатков (карточку удалили) → снять.
+_fake_ozon_stocks = {"items": []}
+with SessionLocal() as s:
+    # Пустой ответ трактуется как сбой (защита) — ничего не снимаем.
+    res = watch_stocks(s, "ozon")
+    s.commit()
+    assert res["removed"] == 0, "пустой ответ остатков не должен ничего снимать"
+with SessionLocal() as s:
+    assert s.query(Book).filter_by(sku="W-2").one().status == BookStatus.IN_STOCK
+print("[ok] слежение: пустой ответ остатков не снимает книги (защита от сбоя API)")
+
+# W-2 действительно пропала, но другие ключи вернулись → снимаем W-2.
+_fake_ozon_stocks = {"items": [{"offer_id": "W-1", "stocks": [{"present": 0}]}]}
+with SessionLocal() as s:
+    res = watch_stocks(s, "ozon")
+    s.commit()
+    # W-1 уже снята ранее (не активна), W-2 активна и пропала из ответа → снять.
+    assert res["removed"] == 1, f"ожидали снятие пропавшей W-2, {res}"
+with SessionLocal() as s:
+    assert s.query(Book).filter_by(sku="W-2").one().status == BookStatus.WITHDRAWN
+print("[ok] слежение: пропавший из ответа ключ (карточки нет) -> снятие")
+
+# Книга только на Ozon не страдает от слежения WB (у неё нет WB-лота с ключом).
+with SessionLocal() as s:
+    # Вернём W-2 в наличие для этой проверки.
+    b2 = s.query(Book).filter_by(sku="W-2").one()
+    lot = s.query(Listing).filter_by(marketplace="ozon", external_id="W-2").one()
+    lot.status = ListingStatus.ACTIVE
+    b2.status = BookStatus.IN_STOCK
+    b2.removed_at = None
+    s.commit()
+_fake_wb_stocks = [{"sku": "wb-b1", "amount": 5}]  # WB знает только про W-1
+with SessionLocal() as s:
+    watch_stocks(s, "wildberries")
+    s.commit()
+with SessionLocal() as s:
+    b2 = s.query(Book).filter_by(sku="W-2").one()
+    assert b2.status == BookStatus.IN_STOCK, "книга только на Ozon снята слежением WB!"
+print("[ok] слежение WB не трогает книгу, которой нет на WB (только на Ozon)")
+
+# Чистим под следующий блок.
+with SessionLocal() as s:
+    s.query(Order).delete()
+    s.query(Listing).delete()
+    s.query(Book).delete()
+    s.commit()
+_fake_ozon_stocks = {"items": []}
+_fake_wb_cards = []
+_fake_wb_stocks = []
+
+
+# --- 9c. Восстанавливаем данные для проверки кнопки сверки ------------------
+
+with SessionLocal() as s:
+    b = Book(sku="WB-ONLY-1", title="Только на WB", status=BookStatus.IN_STOCK, price=300)
+    s.add(b)
+    s.flush()
+    s.add(Listing(book_id=b.id, marketplace="wildberries", external_id="WB-ONLY-1",
+                  stock_key="wbonly", status=ListingStatus.ACTIVE))
+    s.add(Book(sku="OZ-1", title="Книга 1", status=BookStatus.IN_STOCK, price=150))
+    s.flush()
+    oz1 = s.query(Book).filter_by(sku="OZ-1").one()
+    s.add(Listing(book_id=oz1.id, marketplace="ozon", external_id="OZ-1",
+                  stock_key="OZ-1", status=ListingStatus.ACTIVE))
+    s.commit()
+    wb_only_id = s.query(Book).filter_by(sku="WB-ONLY-1").one().id
 
 
 # --- 10. Кнопка «Обновить каталог» (сверка всех площадок) ------------------

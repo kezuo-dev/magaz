@@ -9,6 +9,8 @@ SKU книги используем как offer_id — это наш артик
 """
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from app.marketplaces.base import (
@@ -19,6 +21,11 @@ from app.marketplaces.base import (
 
 BASE_URL = "https://api-seller.ozon.ru"
 TIMEOUT = 30.0
+# Устойчивость к лимитам: на 429 и 5xx повторяем с нарастающей паузой. При
+# слежении за остатками 50k книг запросов много — без ретраев лимит рвал бы сверку.
+RETRY_STATUSES = (429, 500, 502, 503, 504)
+MAX_RETRIES = 4
+RETRY_BACKOFF = 1.5  # секунды: 1.5, 3, 4.5, 6
 
 
 class OzonClient(MarketplaceClient):
@@ -45,28 +52,43 @@ class OzonClient(MarketplaceClient):
         }
 
     def _post(self, path: str, payload: dict) -> dict:
-        """POST к Ozon с обработкой ошибок. Возвращает распарсенный JSON."""
+        """POST к Ozon с обработкой ошибок и ретраями. Возвращает распарсенный JSON."""
         url = f"{BASE_URL}{path}"
-        try:
-            resp = httpx.post(url, json=payload, headers=self._headers(), timeout=TIMEOUT)
-        except httpx.HTTPError as exc:
-            raise MarketplaceError(f"Сеть Ozon недоступна: {exc}") from exc
-
-        if resp.status_code == 401 or resp.status_code == 403:
-            raise MarketplaceError("Ozon отклонил ключи (401/403). Проверьте Client-Id и Api-Key")
-        if resp.status_code >= 400:
-            # Ozon кладёт причину в тело ответа — вытаскиваем её для журнала.
-            detail = ""
+        last_exc: Exception | None = None
+        for attempt in range(MAX_RETRIES + 1):
             try:
-                detail = resp.json().get("message") or resp.text
-            except Exception:
-                detail = resp.text
-            raise MarketplaceError(f"Ozon вернул {resp.status_code}: {detail}")
+                resp = httpx.post(url, json=payload, headers=self._headers(), timeout=TIMEOUT)
+            except httpx.HTTPError as exc:
+                # Сетевой сбой — тоже повод повторить (кратковременная потеря связи).
+                last_exc = MarketplaceError(f"Сеть Ozon недоступна: {exc}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF * (attempt + 1))
+                    continue
+                raise last_exc from exc
 
-        try:
-            return resp.json()
-        except Exception as exc:
-            raise MarketplaceError(f"Ozon вернул не-JSON: {resp.text[:200]}") from exc
+            if resp.status_code in RETRY_STATUSES and attempt < MAX_RETRIES:
+                # Лимит/временный сбой Ozon — ждём и повторяем.
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+                continue
+
+            if resp.status_code == 401 or resp.status_code == 403:
+                raise MarketplaceError("Ozon отклонил ключи (401/403). Проверьте Client-Id и Api-Key")
+            if resp.status_code >= 400:
+                # Ozon кладёт причину в тело ответа — вытаскиваем её для журнала.
+                detail = ""
+                try:
+                    detail = resp.json().get("message") or resp.text
+                except Exception:
+                    detail = resp.text
+                raise MarketplaceError(f"Ozon вернул {resp.status_code}: {detail}")
+
+            try:
+                return resp.json()
+            except Exception as exc:
+                raise MarketplaceError(f"Ozon вернул не-JSON: {resp.text[:200]}") from exc
+
+        # Исчерпали попытки на ретраящемся статусе.
+        raise last_exc or MarketplaceError("Ozon: превышено число повторов запроса (лимит/сбой)")
 
     # --- операции ---------------------------------------------------------
 
@@ -143,6 +165,8 @@ class OzonClient(MarketplaceClient):
                         {
                             "sku": offer_id,
                             "external_id": offer_id,
+                            # Остаток Ozon читается по offer_id — он же ключ остатка.
+                            "stock_key": offer_id,
                             "title": prod.get("name"),
                             "isbn": barcode,
                             "price": str(price) if price not in (None, "") else None,
@@ -153,6 +177,35 @@ class OzonClient(MarketplaceClient):
             if not last_id:
                 break
         return rows
+
+    def fetch_stocks(self, keys: list[str]) -> dict[str, int]:
+        """Остатки FBS по offer_id (ключам остатка). Возвращает {offer_id: остаток}.
+
+        Дешёвый способ узнать «книга ещё в продаже?» без выгрузки всего каталога:
+        спрашиваем остатки ровно по нашим SKU пачками (Ozon берёт до 1000 за раз).
+        Используем /v4/product/info/stocks. Ключей, которых Ozon не знает, в ответе
+        просто не будет — вызывающий код трактует отсутствие как «пропала».
+        """
+        result: dict[str, int] = {}
+        if not keys:
+            return result
+        for i in range(0, len(keys), 1000):
+            batch = keys[i:i + 1000]
+            data = self._post(
+                "/v4/product/info/stocks",
+                {"filter": {"offer_id": batch, "visibility": "ALL"}, "limit": 1000},
+            )
+            items = (data.get("result") or {}).get("items") or data.get("items") or []
+            for it in items:
+                offer_id = it.get("offer_id")
+                if not offer_id:
+                    continue
+                # Складов может быть несколько (fbo/fbs) — берём суммарный доступный.
+                present = 0
+                for st in it.get("stocks") or []:
+                    present += int(st.get("present") or 0)
+                result[str(offer_id)] = present
+        return result
 
     def fetch_orders(self) -> list[OrderInfo]:
         """Получить недавние отправления FBS. Каждый товар в заказе — проданная книга.

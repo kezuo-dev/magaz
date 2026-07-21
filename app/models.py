@@ -114,6 +114,10 @@ class Listing(Base):
     book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), index=True)
     marketplace: Mapped[str] = mapped_column(String(16), index=True)
     external_id: Mapped[str | None] = mapped_column(String(128), index=True, default=None)  # ID лота на площадке
+    # Ключ, по которому площадка отдаёт остаток FBS. Для Ozon это offer_id (= наш
+    # SKU), для WB — баркод (skus[0]), который может отличаться от vendorCode.
+    # Храним отдельно, чтобы слежение за остатками спрашивало площадку по её ключу.
+    stock_key: Mapped[str | None] = mapped_column(String(128), index=True, default=None)
     status: Mapped[str] = mapped_column(String(16), default=ListingStatus.PENDING, index=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)

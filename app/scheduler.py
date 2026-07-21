@@ -1,11 +1,13 @@
-"""Фоновый опрос заказов площадок.
+"""Фоновые механизмы синхронизации с площадками.
 
-APScheduler раз в poll_interval_minutes проходит по всем включённым площадкам,
-запрашивает свежие заказы и обрабатывает продажи (пометка sold + кросс-снятие).
-Работает, только пока запущен сервер — это учтено в плане (локальный режим).
+Три независимых задачи APScheduler (интервалы в config.py):
+1. poll_all_marketplaces — опрос заказов (~1 мин): продажи → кросс-снятие.
+2. watch_all_marketplaces_stocks — слежение за остатками наших книг (~5 мин):
+   дёшево, ловит снятия/продажи почти сразу.
+3. sync_all_catalogs — полная сверка каталога (~60 мин): новые книги + подстраховка.
 
-Планировщик ходит в БД из отдельного потока, поэтому открывает собственную сессию
-через SessionLocal (не через зависимость FastAPI).
+Работает, только пока запущен сервер. Планировщик ходит в БД из отдельного потока,
+поэтому открывает собственную сессию через SessionLocal (не через зависимость FastAPI).
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 
 from app.archive import sweep_to_archive
-from app.catalog_sync import sync_all
+from app.catalog_sync import sync_all, watch_all_stocks
 from app.config import settings
 from app.db import SessionLocal
 from app.models import MarketplaceAccount
@@ -54,12 +56,32 @@ def poll_all_marketplaces() -> None:
         db.close()
 
 
+def watch_all_marketplaces_stocks() -> None:
+    """Один проход слежения за остатками наших книг по всем включённым площадкам.
+
+    Дёшево (спрашиваем остатки только по нашим ключам), поэтому идёт часто. Остаток
+    0 / пропавшая карточка → кросс-снятие. watch_all_stocks сам коммитит и не роняет
+    планировщик на сбое.
+    """
+    db = SessionLocal()
+    try:
+        results = watch_all_stocks(db)
+        removed = sum(r.get("removed", 0) for r in results.values() if isinstance(r, dict))
+        if removed:
+            logger.info("Слежение за остатками: снято книг %s (%s)", removed, results)
+    except Exception:  # noqa: BLE001 — сбой слежения не должен ронять планировщик
+        db.rollback()
+        logger.exception("Сбой слежения за остатками")
+    finally:
+        db.close()
+
+
 def sync_all_catalogs() -> None:
     """Один проход полной сверки каталога по всем включённым площадкам.
 
     Тяжелее опроса заказов (тянет все карточки), поэтому идёт по своему, более
-    редкому интервалу. Ловит снятия/пропажи, не пришедшие через заказы, и
-    кросс-снимает их. sync_all сам коммитит и не роняет планировщик на сбое.
+    редкому интервалу. Находит НОВЫЕ книги и снимает пропавшие. sync_all сам
+    коммитит и не роняет планировщик на сбое.
     """
     db = SessionLocal()
     try:
@@ -87,6 +109,14 @@ def start_scheduler() -> None:
         coalesce=True,
     )
     _scheduler.add_job(
+        watch_all_marketplaces_stocks,
+        trigger="interval",
+        minutes=settings.stock_watch_interval_minutes,
+        id="watch_stocks",
+        max_instances=1,
+        coalesce=True,
+    )
+    _scheduler.add_job(
         sync_all_catalogs,
         trigger="interval",
         minutes=settings.catalog_sync_interval_minutes,
@@ -96,8 +126,9 @@ def start_scheduler() -> None:
     )
     _scheduler.start()
     logger.info(
-        "Планировщик запущен: опрос заказов каждые %s мин, сверка каталога каждые %s мин",
+        "Планировщик запущен: заказы %s мин, остатки %s мин, сверка каталога %s мин",
         settings.poll_interval_minutes,
+        settings.stock_watch_interval_minutes,
         settings.catalog_sync_interval_minutes,
     )
 
