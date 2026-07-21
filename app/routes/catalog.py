@@ -8,7 +8,7 @@
 import shutil
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -23,11 +23,32 @@ from app.models import (
     SyncLog,
 )
 from app.photos import UPLOAD_DIR
+from app.templating import book_status_label, listing_status_label, marketplace_short
 from app.templating import templates
 
 router = APIRouter()
 
 PAGE_SIZE = 50
+
+
+def _filtered_books_query(q: str, status: str, marketplace: str):
+    """Собрать запрос списка книг по поиску/фильтрам (общий для страницы и API)."""
+    stmt = select(Book).options(selectinload(Book.listings))
+    if q:
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Book.title.ilike(like),
+                Book.sku.ilike(like),
+                Book.isbn.ilike(like),
+            )
+        )
+    if status:
+        stmt = stmt.where(Book.status == status)
+    # Фильтр по площадке: оставляем книги, у которых есть лот на этой площадке.
+    if marketplace:
+        stmt = stmt.where(Book.listings.any(Listing.marketplace == marketplace))
+    return stmt
 
 
 def _catalog_stats(db: Session) -> dict:
@@ -65,22 +86,7 @@ def index(
     wipe_error: str = "",
     synced: str = "",
 ):
-    stmt = select(Book).options(selectinload(Book.listings))
-
-    if q:
-        like = f"%{q.strip()}%"
-        stmt = stmt.where(
-            or_(
-                Book.title.ilike(like),
-                Book.sku.ilike(like),
-                Book.isbn.ilike(like),
-            )
-        )
-    if status:
-        stmt = stmt.where(Book.status == status)
-    # Фильтр по площадке: оставляем книги, у которых есть лот на этой площадке.
-    if marketplace:
-        stmt = stmt.where(Book.listings.any(Listing.marketplace == marketplace))
+    stmt = _filtered_books_query(q, status, marketplace)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -111,6 +117,45 @@ def index(
             "stats": _catalog_stats(db),
         },
     )
+
+
+@router.get("/api/books")
+def api_books(
+    db: Session = Depends(get_db),
+    q: str = "",
+    status: str = "",
+    marketplace: str = "",
+    page: int = 1,
+):
+    """JSON-фрагмент списка книг для живого поиска по мере ввода (без перезагрузки)."""
+    stmt = _filtered_books_query(q, status, marketplace)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery()))
+    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(max(1, page), pages)
+    books = db.scalars(
+        stmt.order_by(Book.updated_at.desc())
+        .offset((page - 1) * PAGE_SIZE)
+        .limit(PAGE_SIZE)
+    ).all()
+
+    items = []
+    for b in books:
+        items.append(
+            {
+                "id": b.id,
+                "sku": b.sku,
+                "title": b.title,
+                "price": f"{b.price:.0f} ₽" if b.price is not None else "—",
+                "status": b.status,
+                "status_label": book_status_label(b.status),
+                "listings": [
+                    {"short": marketplace_short(l.marketplace), "status": l.status,
+                     "status_label": listing_status_label(l.status)}
+                    for l in b.listings
+                ],
+            }
+        )
+    return JSONResponse({"items": items, "total": total, "page": page, "pages": pages})
 
 
 @router.get("/books/{book_id}", response_class=HTMLResponse)

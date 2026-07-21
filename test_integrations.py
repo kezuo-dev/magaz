@@ -546,6 +546,29 @@ with SessionLocal() as s:
 print("[ok] очистка каталога не падает при ссылках SyncLog/Order и чистит всё")
 
 
+# --- 15. Живой поиск: JSON-API и метка WB (не WI) --------------------------
+
+with SessionLocal() as s:
+    b = Book(sku="SRCH-1", title="Уникальное Название Книги", status=BookStatus.IN_STOCK, price=99)
+    s.add(b)
+    s.flush()
+    s.add(Listing(book_id=b.id, marketplace="wildberries", external_id="SRCH-1",
+                  stock_key="SRCH-1", status=ListingStatus.ACTIVE))
+    s.commit()
+
+r = c.get("/api/books?q=Уникальное")
+assert r.status_code == 200, f"API поиска вернул {r.status_code}"
+data = r.json()
+assert data["total"] == 1, f"поиск нашёл {data['total']} вместо 1"
+item = data["items"][0]
+assert item["sku"] == "SRCH-1", "не та книга в выдаче поиска"
+# Метка площадки WB, а не WI (это была ошибка wildberries[:2]).
+assert item["listings"][0]["short"] == "WB", f"метка площадки {item['listings'][0]['short']} вместо WB"
+# Пустой запрос по мусору — ничего.
+assert c.get("/api/books?q=неттакойкниги000").json()["total"] == 0, "поиск нашёл несуществующее"
+print("[ok] живой поиск: JSON-API фильтрует, метка площадки — WB")
+
+
 # --- Чистка ---------------------------------------------------------------
 
 with SessionLocal() as s:

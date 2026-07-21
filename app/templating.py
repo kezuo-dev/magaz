@@ -27,6 +27,12 @@ MARKETPLACE_LABELS = {
     "wildberries": "Wildberries",
 }
 
+# Короткие метки для компактных индикаторов площадок (WI из wildberries[:2] — баг).
+MARKETPLACE_SHORT = {
+    "ozon": "OZ",
+    "wildberries": "WB",
+}
+
 
 def book_status_label(value: str) -> str:
     return BOOK_STATUS_LABELS.get(value, value)
@@ -40,7 +46,12 @@ def marketplace_label(value: str) -> str:
     return MARKETPLACE_LABELS.get(value, value)
 
 
+def marketplace_short(value: str) -> str:
+    return MARKETPLACE_SHORT.get(value, (value or "")[:2].upper())
+
+
 # Делаем доступными во всех шаблонах.
 templates.env.globals["book_status_label"] = book_status_label
 templates.env.globals["listing_status_label"] = listing_status_label
 templates.env.globals["marketplace_label"] = marketplace_label
+templates.env.globals["marketplace_short"] = marketplace_short

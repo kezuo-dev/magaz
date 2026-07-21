@@ -6,16 +6,16 @@
     <p class="page-sub muted">Мониторинг книг на Ozon и Wildberries — только просмотр.</p>
   </div>
   <div class="head-actions">
-    <form method="post" action="/import/sync" class="inline-form js-loading-form">
-      <button type="submit" data-loading-text="Сверяем каталог…">🔄 Обновить каталог</button>
-    </form>
-    <button type="button" class="ghost-danger" onclick="document.getElementById('wipe-box').hidden = false">Очистить</button>
+    <button type="button" id="sync-btn">🔄 Обновить каталог</button>
+    <button type="button" class="ghost-danger" id="wipe-open">Очистить</button>
   </div>
 </div>
 
-{% if wiped %}<div class="notice ok">Каталог полностью очищен.</div>{% endif %}
-{% if wipe_error %}<div class="notice err">Не удалось очистить каталог: неверный пароль или ошибка базы. Данные не тронуты.</div>{% endif %}
-{% if synced %}<div class="notice ok">Каталог сверён с площадками: {{ synced }}</div>{% endif %}
+<div class="notice-stack">
+  {% if wiped %}<div class="notice ok"><span>Каталог полностью очищен.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if wipe_error %}<div class="notice err"><span>Не удалось очистить каталог: неверный пароль или ошибка базы. Данные не тронуты.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if synced %}<div class="notice ok"><span>Каталог сверён с площадками: {{ synced }}</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+</div>
 
 <div class="stats">
   <div class="stat-card">
@@ -40,36 +40,25 @@
   </div>
 </div>
 
-<div id="wipe-box" class="wipe-box" hidden>
-  <form method="post" action="/catalog/wipe" onsubmit="return confirm('Удалить ВСЕ книги, лоты, заказы и журнал из программы без возможности восстановления?\n\nНа Ozon и Wildberries товары НЕ будут затронуты.')">
-    <b>Очистка каталога в программе</b>
-    <p class="muted">Удаляет все книги, лоты, заказы, журнал и загруженные фото <b>только в этой программе</b>. Каталог на площадках не затрагивается. Действие необратимо.</p>
-    <div class="wipe-row">
-      <input type="password" name="password" placeholder="Пароль очистки" required autocomplete="off">
-      <button type="submit" class="danger">Удалить всё</button>
-      <button type="button" class="secondary" onclick="document.getElementById('wipe-box').hidden = true">Отмена</button>
-    </div>
-  </form>
-</div>
-
-<form method="get" action="/" class="toolbar">
+<form method="get" action="/" class="toolbar" id="filter-form" autocomplete="off">
   <div class="search-field">
     <span class="search-icon">🔍</span>
-    <input type="text" name="q" value="{{ q }}" placeholder="Поиск по названию, артикулу или ISBN">
+    <input type="text" name="q" id="search-input" value="{{ q }}" placeholder="Поиск по названию, артикулу или ISBN">
+    <span class="search-spin" id="search-spin" hidden></span>
   </div>
-  <select name="status">
+  <select name="status" id="filter-status">
     <option value="">Все статусы</option>
     {% for s in statuses %}
     <option value="{{ s.value }}" {% if status == s.value %}selected{% endif %}>{{ book_status_label(s.value) }}</option>
     {% endfor %}
   </select>
-  <select name="marketplace">
+  <select name="marketplace" id="filter-marketplace">
     <option value="">Все площадки</option>
     {% for m in marketplaces %}
     <option value="{{ m.value }}" {% if marketplace == m.value %}selected{% endif %}>{{ marketplace_label(m.value) }}</option>
     {% endfor %}
   </select>
-  <button type="submit">Искать</button>
+  <button type="submit" class="btn-search-submit">Искать</button>
 </form>
 
 <div class="table-wrap">
@@ -83,7 +72,7 @@
         <th>Площадки</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="books-body">
       {% for book in books %}
       <tr onclick="location.href='/books/{{ book.id }}'" class="clickable">
         <td class="mono">{{ book.sku }}</td>
@@ -92,14 +81,14 @@
         <td><span class="badge badge-{{ book.status }}">{{ book_status_label(book.status) }}</span></td>
         <td class="mp-cells">
           {% for l in book.listings %}
-          <span class="mp mp-{{ l.status }}" title="{{ marketplace_label(l.marketplace) }}: {{ listing_status_label(l.status) }}">{{ l.marketplace[:2]|upper }}</span>
+          <span class="mp mp-{{ l.status }}" title="{{ marketplace_label(l.marketplace) }}: {{ listing_status_label(l.status) }}">{{ marketplace_short(l.marketplace) }}</span>
           {% else %}
           <span class="muted">—</span>
           {% endfor %}
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="empty">
+      <tr class="empty-row"><td colspan="5" class="empty">
         <div class="empty-box">
           <div class="empty-icon">📚</div>
           <div>Каталог пуст. Нажмите «Обновить каталог» или загрузите выгрузку через «Обновление каталога».</div>
@@ -110,36 +99,151 @@
   </table>
 </div>
 
-<div class="list-foot muted">Показано {{ books|length }} из {{ total }} книг</div>
+<div class="list-foot muted"><span id="list-count">Показано {{ books|length }} из {{ total }} книг</span></div>
 
 {% if pages > 1 %}
-<div class="pager">
+<div class="pager" id="pager">
   {% if page > 1 %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page-1 }}">← Назад</a>{% endif %}
   <span>Стр. {{ page }} из {{ pages }}</span>
   {% if page < pages %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page+1 }}">Вперёд →</a>{% endif %}
-  <form method="get" action="/" class="pager-go">
-    <input type="hidden" name="q" value="{{ q }}">
-    <input type="hidden" name="status" value="{{ status }}">
-    <input type="hidden" name="marketplace" value="{{ marketplace }}">
-    <label>Стр.
-      <input type="number" name="page" value="{{ page }}" min="1" max="{{ pages }}">
-    </label>
-    <button type="submit">ОК</button>
-  </form>
 </div>
 {% endif %}
 
+<!-- Модалка очистки каталога -->
+<div class="modal-overlay" id="wipe-modal" hidden>
+  <div class="modal modal-danger" role="dialog" aria-modal="true" aria-labelledby="wipe-title">
+    <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
+    <div class="modal-icon">⚠️</div>
+    <h2 id="wipe-title">Очистить каталог?</h2>
+    <p class="muted">Удаляет все книги, лоты, заказы, журнал и загруженные фото <b>только в этой программе</b>. Каталог на Ozon и Wildberries не затрагивается. Действие необратимо.</p>
+    <form method="post" action="/catalog/wipe" class="modal-form">
+      <input type="password" name="password" placeholder="Пароль очистки" required autocomplete="off">
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-close>Отмена</button>
+        <button type="submit" class="danger">Удалить всё</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Модалка подтверждения сверки -->
+<div class="modal-overlay" id="sync-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sync-title">
+    <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
+    <div class="modal-icon">🔄</div>
+    <h2 id="sync-title">Обновить каталог?</h2>
+    <p class="muted">Программа заново сверит каталог с Ozon и Wildberries: добавит новые книги и снимет пропавшие. Это может занять некоторое время.</p>
+    <form method="post" action="/import/sync" class="modal-form js-loading-form">
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-close>Отмена</button>
+        <button type="submit" data-loading-text="Сверяем каталог…">Обновить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
-  // Кнопка «Обновить каталог» может идти долго — показываем состояние загрузки.
+  // ---- Закрытие уведомлений крестиком (с плавным исчезновением) ----
+  document.querySelectorAll(".notice-close").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      const n = btn.closest(".notice");
+      n.classList.add("closing");
+      setTimeout(() => n.remove(), 260);
+    });
+  });
+
+  // ---- Модальные окна ----
+  function openModal(id) {
+    const m = document.getElementById(id);
+    m.hidden = false;
+    requestAnimationFrame(() => m.classList.add("show"));
+  }
+  function closeModal(m) {
+    m.classList.remove("show");
+    setTimeout(() => { m.hidden = true; }, 220);
+  }
+  document.getElementById("wipe-open").addEventListener("click", () => openModal("wipe-modal"));
+  document.getElementById("sync-btn").addEventListener("click", () => openModal("sync-modal"));
+  document.querySelectorAll(".modal-overlay").forEach(function (ov) {
+    ov.addEventListener("click", function (e) {
+      if (e.target === ov || e.target.hasAttribute("data-close")) closeModal(ov);
+    });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") document.querySelectorAll(".modal-overlay:not([hidden])").forEach(closeModal);
+  });
+
+  // ---- Индикатор загрузки на кнопке сверки ----
   for (const form of document.querySelectorAll(".js-loading-form")) {
     form.addEventListener("submit", function () {
       const btn = form.querySelector("button[type=submit]");
       if (!btn) return;
       btn.disabled = true;
       btn.classList.add("is-loading");
-      const text = btn.dataset.loadingText || "Загружаем…";
-      btn.innerHTML = '<span class="spinner"></span>' + text;
+      btn.innerHTML = '<span class="spinner"></span>' + (btn.dataset.loadingText || "Загружаем…");
     });
   }
+
+  // ---- Живой поиск по мере ввода ----
+  (function () {
+    const input = document.getElementById("search-input");
+    const statusSel = document.getElementById("filter-status");
+    const mpSel = document.getElementById("filter-marketplace");
+    const body = document.getElementById("books-body");
+    const countEl = document.getElementById("list-count");
+    const spin = document.getElementById("search-spin");
+    const pager = document.getElementById("pager");
+    let timer = null, seq = 0;
+
+    function esc(s) {
+      return (s == null ? "" : String(s)).replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    function renderRows(items) {
+      if (!items.length) {
+        body.innerHTML = '<tr class="empty-row"><td colspan="5" class="empty">' +
+          '<div class="empty-box"><div class="empty-icon">🔍</div>' +
+          '<div>Ничего не найдено. Измените запрос или фильтры.</div></div></td></tr>';
+        return;
+      }
+      body.innerHTML = items.map(function (b) {
+        const mps = b.listings.length
+          ? b.listings.map(l => '<span class="mp mp-' + l.status + '" title="' + esc(l.status_label) + '">' + esc(l.short) + '</span>').join("")
+          : '<span class="muted">—</span>';
+        return '<tr class="clickable" onclick="location.href=\'/books/' + b.id + '\'">' +
+          '<td class="mono">' + esc(b.sku) + '</td>' +
+          '<td class="col-title"><a href="/books/' + b.id + '">' + esc(b.title) + '</a></td>' +
+          '<td class="col-price">' + esc(b.price) + '</td>' +
+          '<td><span class="badge badge-' + b.status + '">' + esc(b.status_label) + '</span></td>' +
+          '<td class="mp-cells">' + mps + '</td></tr>';
+      }).join("");
+    }
+
+    function run() {
+      const mySeq = ++seq;
+      spin.hidden = false;
+      const params = new URLSearchParams({ q: input.value, status: statusSel.value, marketplace: mpSel.value });
+      fetch("/api/books?" + params.toString())
+        .then(r => r.json())
+        .then(function (data) {
+          if (mySeq !== seq) return;  // пришёл устаревший ответ — игнорируем
+          spin.hidden = true;
+          renderRows(data.items);
+          countEl.textContent = "Показано " + data.items.length + " из " + data.total + " книг";
+          if (pager) pager.style.display = "none";  // живой поиск показывает первую страницу
+          body.classList.remove("fade-in"); void body.offsetWidth; body.classList.add("fade-in");
+        })
+        .catch(function () { spin.hidden = true; });
+    }
+
+    function schedule() { clearTimeout(timer); timer = setTimeout(run, 220); }
+
+    input.addEventListener("input", schedule);
+    statusSel.addEventListener("change", run);
+    mpSel.addEventListener("change", run);
+    // Не перезагружаем страницу по Enter — поиск уже живой.
+    document.getElementById("filter-form").addEventListener("submit", function (e) { e.preventDefault(); run(); });
+  })();
 </script>
 {% endblock %}

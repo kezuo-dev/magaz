@@ -1,47 +1,54 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Настройки площадок</h1></div>
+<div class="page-head">
+  <div>
+    <h1>Настройки площадок</h1>
+    <p class="page-sub muted">Ключи хранятся в зашифрованном виде. Пока площадка выключена, программа
+    меняет только локальные статусы. Включите её, чтобы сверка, слежение за остатками и опрос заказов шли по-настоящему.</p>
+  </div>
+</div>
 
-<p class="muted">Ключи хранятся в зашифрованном виде. Пока площадка выключена, программа
-меняет только локальные статусы и никуда не отправляет данные. Включите площадку и введите
-ключи, чтобы сверка каталога, слежение за остатками и опрос заказов шли по-настоящему.</p>
-
-{% if saved %}<div class="notice ok">Настройки «{{ marketplace_label(saved) }}» сохранены.</div>{% endif %}
-{% if checked %}
-  {% set mp, status = checked.split(':') %}
-  {% if status == 'ok' %}
-    <div class="notice ok">{{ marketplace_label(mp) }}: подключение успешно.</div>
-  {% else %}
-    <div class="notice err">{{ marketplace_label(mp) }}: подключиться не удалось. Подробности в журнале.</div>
+<div class="notice-stack">
+  {% if saved %}<div class="notice ok"><span>Настройки «{{ marketplace_label(saved) }}» сохранены.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if checked %}
+    {% set mp, status = checked.split(':') %}
+    {% if status == 'ok' %}
+      <div class="notice ok"><span>{{ marketplace_label(mp) }}: подключение успешно.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>
+    {% else %}
+      <div class="notice err"><span>{{ marketplace_label(mp) }}: подключиться не удалось. Подробности в журнале.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>
+    {% endif %}
   {% endif %}
-{% endif %}
+</div>
 
-<div class="settings-grid">
+<div class="mp-settings">
   {% for card in cards %}
-  <div class="settings-card">
-    <div class="settings-card-head">
-      <h2>{{ marketplace_label(card.marketplace) }}</h2>
-      {% if card.enabled %}
-        <span class="badge badge-in_stock">Включена</span>
-      {% else %}
-        <span class="badge badge-withdrawn">Выключена</span>
-      {% endif %}
+  <div class="mp-card">
+    <div class="mp-card-head">
+      <div class="mp-card-title">
+        <span class="mp-logo mp-logo-{{ card.marketplace }}">{{ marketplace_short(card.marketplace) }}</span>
+        <h2>{{ marketplace_label(card.marketplace) }}</h2>
+      </div>
+      <span class="status-dot {{ 'on' if card.enabled else 'off' }}">
+        <i></i>{{ 'Включена' if card.enabled else 'Выключена' }}
+      </span>
     </div>
 
-    {% if not card.supported %}
-      <p class="muted">Живая интеграция появится на следующей фазе. Ключи можно сохранить заранее.</p>
-    {% elif card.has_credentials %}
-      <p class="muted">Ключи сохранены{% if card.updated_at %} · обновлены {{ card.updated_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}. Оставьте поля пустыми, чтобы не менять.</p>
-    {% else %}
-      <p class="muted">Ключи ещё не заданы.</p>
-    {% endif %}
+    <p class="mp-card-note muted">
+      {% if not card.supported %}
+        Живая интеграция появится позже. Ключи можно сохранить заранее.
+      {% elif card.has_credentials %}
+        Ключи сохранены{% if card.updated_at %} · обновлены {{ card.updated_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}. Оставьте поля пустыми, чтобы не менять.
+      {% else %}
+        Ключи ещё не заданы.
+      {% endif %}
+    </p>
 
-    <form method="post" action="/settings/save" class="book-form" data-marketplace="{{ card.marketplace }}">
+    <form method="post" action="/settings/save" class="mp-form" data-marketplace="{{ card.marketplace }}">
       <input type="hidden" name="marketplace" value="{{ card.marketplace }}">
       {% for key, label in card.fields %}
-      <label>{{ label }}
+      <label class="field">
+        <span class="field-label">{{ label }}</span>
         {% if key.endswith('_id') %}
-        {# Идентификаторы (склад и т.п.) — не секреты, показываем обычным полем. #}
         <input type="text" name="cred_{{ key }}" autocomplete="off"
                placeholder="{{ 'сохранено, введите новое для замены' if card.has_credentials else '' }}">
         {% else %}
@@ -51,23 +58,30 @@
       </label>
       {% endfor %}
 
-      <label class="checkbox">
-        <input type="checkbox" name="enabled" {{ 'checked' if card.enabled else '' }}>
-        Включить площадку (реальные вызовы API)
+      <label class="switch-row">
+        <input type="checkbox" name="enabled" class="switch-input" {{ 'checked' if card.enabled else '' }}>
+        <span class="switch"></span>
+        <span>Включить площадку (реальные вызовы API)</span>
       </label>
-      <div class="settings-actions">
+
+      <div class="mp-card-actions">
         <button type="submit">Сохранить</button>
+        {% if card.supported and card.has_credentials %}
+        <button type="submit" formaction="/settings/check" class="secondary">Проверить подключение</button>
+        {% endif %}
       </div>
     </form>
-
-    {% if card.supported and card.has_credentials %}
-    <form method="post" action="/settings/check" class="inline-form">
-      <input type="hidden" name="marketplace" value="{{ card.marketplace }}">
-      <button type="submit" class="secondary">Проверить подключение</button>
-    </form>
-    {% endif %}
   </div>
   {% endfor %}
 </div>
 
+<script>
+  document.querySelectorAll(".notice-close").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      const n = btn.closest(".notice");
+      n.classList.add("closing");
+      setTimeout(() => n.remove(), 260);
+    });
+  });
+</script>
 {% endblock %}
