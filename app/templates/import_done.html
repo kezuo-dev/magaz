@@ -1,14 +1,34 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>{% if via_api %}Сверка завершена{% else %}Импорт завершён{% endif %}</h1></div>
-<div class="result-box">
-  <p>Площадка: <b>{{ marketplace_label(marketplace) }}</b>{% if auto and not via_api %} <span class="muted">(определена автоматически)</span>{% endif %}</p>
-  <ul>
-    <li>Создано новых книг: <b>{{ created }}</b></li>
-    <li>Обновлено существующих: <b>{{ updated }}</b></li>
-    {% if removed is defined %}<li>Снято пропавших с площадки: <b>{{ removed }}</b></li>{% endif %}
-    <li>Пропущено (нет названия и SKU): <b>{{ skipped }}</b></li>
-  </ul>
+<div class="page-head">
+  <div>
+    <h1>{% if via_api %}Сверка завершена{% else %}Импорт завершён{% endif %}</h1>
+    <p class="page-sub muted">Площадка: <b>{{ marketplace_label(marketplace) }}</b>{% if auto and not via_api %} (определена автоматически){% endif %}</p>
+  </div>
+</div>
+
+<div class="result-stats">
+  <div class="stat-card stat-ok">
+    <div class="stat-num">{{ created }}</div>
+    <div class="stat-label">Создано новых</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ updated }}</div>
+    <div class="stat-label">Обновлено</div>
+  </div>
+  {% if removed is defined %}
+  <div class="stat-card stat-muted">
+    <div class="stat-num">{{ removed }}</div>
+    <div class="stat-label">Снято пропавших</div>
+  </div>
+  {% endif %}
+  <div class="stat-card stat-muted">
+    <div class="stat-num">{{ skipped }}</div>
+    <div class="stat-label">Пропущено</div>
+  </div>
+</div>
+
+<div class="result-actions">
   <a href="/" class="btn">Открыть каталог</a>
   <a href="/import" class="btn muted">Сверить ещё</a>
 </div>

@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head">
-  <h1>Сопоставление колонок</h1>
-  <span class="muted">{{ marketplace_label(marketplace) }} · {{ total }} строк</span>
+  <div>
+    <h1>Сопоставление колонок</h1>
+    <p class="page-sub muted">{{ marketplace_label(marketplace) }} · {{ total }} строк. Не удалось распознать колонки
+    автоматически — укажите вручную, какая колонка файла какому полю соответствует. Обязательны «Название» или «Артикул».</p>
+  </div>
 </div>
 
-<p class="muted">Не удалось распознать колонки автоматически. Укажите вручную, какая колонка
-файла соответствует какому полю книги. Обязательны хотя бы «Название» или «Артикул».</p>
-
-<form method="post" action="/import/run" class="book-form">
+<form method="post" action="/import/run" class="upload-card">
+  <div class="table-wrap">
   <table class="grid">
     <thead><tr><th>Поле книги</th><th>Колонка файла</th></tr></thead>
     <tbody>
@@ -29,9 +30,10 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   <h2>Предпросмотр (первые строки)</h2>
-  <div class="scroll-x">
+  <div class="table-wrap scroll-x">
     <table class="grid small">
       <thead><tr>{% for col in columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
       <tbody>
@@ -42,6 +44,8 @@
     </table>
   </div>
 
-  <button type="submit">Импортировать {{ total }} строк</button>
+  <div class="upload-actions">
+    <button type="submit">Импортировать {{ total }} строк</button>
+  </div>
 </form>
 {% endblock %}

@@ -180,6 +180,7 @@ table.grid thead th {
   font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
 }
 table.grid tbody tr { transition: background .12s ease; }
+table.grid.small th, table.grid.small td { padding: 7px 10px; font-size: 12px; }
 table.grid tbody tr:hover { background: var(--accent-soft); }
 table.grid tbody tr:last-child td { border-bottom: none; }
 table.grid tr.clickable { cursor: pointer; }
@@ -352,12 +353,40 @@ th.col-price { text-align: right; }
 .import-advanced { margin: 4px 0 8px; }
 .import-advanced summary { cursor: pointer; color: var(--accent); font-size: 14px; }
 
+/* ---------- Обновление каталога ---------- */
+.import-section { margin-bottom: 30px; }
+.section-head { margin-bottom: 16px; }
+.section-head h2 { margin: 0 0 4px; font-size: 18px; }
+.section-head p { margin: 0; font-size: 14px; max-width: 760px; }
+
+.upload-card {
+  display: flex; flex-direction: column; gap: 16px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 22px; box-shadow: var(--shadow-sm); max-width: 620px;
+}
+.dropzone {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 32px 20px; border: 2px dashed var(--line-strong); border-radius: var(--radius);
+  background: var(--surface-2); cursor: pointer; text-align: center;
+  transition: border-color .18s ease, background .18s ease;
+}
+.dropzone:hover { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone.has-file { border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
+.dropzone input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.dropzone-icon { font-size: 34px; line-height: 1; }
+.dropzone-text { font-weight: 600; color: var(--ink); word-break: break-all; }
+.dropzone-hint { font-size: 13px; color: var(--muted); }
+.upload-actions { display: flex; }
+.upload-actions button { width: 100%; }
+
 .book-form { display: flex; flex-direction: column; gap: 16px; background: var(--surface); padding: 22px; border-radius: var(--radius); border: 1px solid var(--line); max-width: 720px; box-shadow: var(--shadow-sm); }
 .book-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-soft); }
 .form-actions { display: flex; align-items: center; gap: 12px; }
 
 .result-box { background: var(--surface); padding: 26px; border-radius: var(--radius); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
 .result-box ul { line-height: 1.9; }
+.result-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.result-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 
 .field-label { font-size: 13px; color: var(--ink-soft); }
 

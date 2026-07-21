@@ -1,72 +1,125 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Обновление каталога</h1></div>
-
-{% if error %}<p class="error">{{ error }}</p>{% endif %}
-
-<h2>Сверить с площадкой</h2>
-<p class="muted">Заберём весь каталог напрямую по API и обновим: добавим новые книги, а пропавшие
-(проданные/снятые) снимем со всех площадок. Кнопка активна, если площадка включена и ключи заданы
-в Настройках.</p>
-
-<div class="settings-grid">
-  {% for src in sources %}
-  <div class="settings-card import-source">
-    <div class="settings-card-head">
-      <h2>{{ marketplace_label(src.marketplace) }}</h2>
-    </div>
-    {% if src.ready %}
-    <p class="muted">Площадка подключена. Сверим весь каталог по сохранённым ключам.</p>
-    <form method="post" action="/import/pull/{{ src.marketplace }}" class="import-source-action js-loading-form">
-      <button type="submit" data-loading-text="Сверяем каталог…">Сверить {{ marketplace_label(src.marketplace) }}</button>
-    </form>
-    {% else %}
-    <p class="muted">Включите площадку и введите ключи в <a href="/settings">Настройках</a>.</p>
-    <div class="import-source-action">
-      <button type="button" disabled>Сверить {{ marketplace_label(src.marketplace) }}</button>
-    </div>
-    {% endif %}
+<div class="page-head">
+  <div>
+    <h1>Обновление каталога</h1>
+    <p class="page-sub muted">Сверка с площадками по API или загрузка выгрузки из файла.</p>
   </div>
-  {% endfor %}
 </div>
 
-<h2 style="margin-top:2rem;">Загрузить из файла</h2>
-<p class="muted">Если каталог удобнее взять из выгрузки — выберите файл (CSV или XLSX) и нажмите
-«Импортировать». Площадку и колонки распознаем автоматически. Файл только добавляет/обновляет книги
-и не снимает отсутствующие (для полной сверки используйте кнопки выше).</p>
+<div class="notice-stack">
+  {% if error %}<div class="notice err"><span>{{ error }}</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+</div>
 
-<form method="post" action="/import/upload" enctype="multipart/form-data" class="book-form js-loading-form">
-  <label>Файл выгрузки (.csv, .xlsx)
-    <input type="file" name="file" accept=".csv,.xlsx,.xls" required>
-  </label>
+<section class="import-section">
+  <div class="section-head">
+    <h2>Сверить с площадкой</h2>
+    <p class="muted">Заберём весь каталог напрямую по API: добавим новые книги, а пропавшие
+    (проданные/снятые) снимем со всех площадок. Кнопка активна, если площадка включена и ключи заданы в Настройках.</p>
+  </div>
 
-  <details class="import-advanced">
-    <summary>Указать площадку вручную (обычно не нужно)</summary>
-    <label>Площадка
-      <select name="marketplace">
-        <option value="">— определить автоматически —</option>
-        {% for m in marketplaces %}
-        <option value="{{ m.value }}">{{ marketplace_label(m.value) }}</option>
-        {% endfor %}
-      </select>
+  <div class="mp-settings">
+    {% for src in sources %}
+    <div class="mp-card">
+      <div class="mp-card-head">
+        <div class="mp-card-title">
+          <span class="mp-logo mp-logo-{{ src.marketplace }}">{{ marketplace_short(src.marketplace) }}</span>
+          <h2>{{ marketplace_label(src.marketplace) }}</h2>
+        </div>
+        <span class="status-dot {{ 'on' if src.ready else 'off' }}">
+          <i></i>{{ 'Готова' if src.ready else 'Не настроена' }}
+        </span>
+      </div>
+
+      {% if src.ready %}
+      <p class="mp-card-note muted">Площадка подключена. Сверим весь каталог по сохранённым ключам.</p>
+      <form method="post" action="/import/pull/{{ src.marketplace }}" class="mp-card-actions js-loading-form">
+        <button type="submit" data-loading-text="Сверяем каталог…">Сверить {{ marketplace_label(src.marketplace) }}</button>
+      </form>
+      {% else %}
+      <p class="mp-card-note muted">Включите площадку и введите ключи в <a href="/settings">Настройках</a>.</p>
+      <div class="mp-card-actions">
+        <button type="button" disabled>Сверить {{ marketplace_label(src.marketplace) }}</button>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="import-section">
+  <div class="section-head">
+    <h2>Загрузить из файла</h2>
+    <p class="muted">Если каталог удобнее взять из выгрузки — выберите файл CSV или XLSX. Площадку и колонки
+    распознаем автоматически. Файл только добавляет и обновляет книги, но не снимает отсутствующие
+    (для полной сверки используйте карточки выше).</p>
+  </div>
+
+  <form method="post" action="/import/upload" enctype="multipart/form-data" class="upload-card js-loading-form">
+    <label class="dropzone" id="dropzone">
+      <input type="file" name="file" id="file-input" accept=".csv,.xlsx,.xls" required>
+      <span class="dropzone-icon">📄</span>
+      <span class="dropzone-text" id="dropzone-text">Нажмите, чтобы выбрать файл</span>
+      <span class="dropzone-hint">CSV или XLSX</span>
     </label>
-  </details>
 
-  <button type="submit" data-loading-text="Импортируем файл…">Импортировать</button>
-</form>
+    <details class="import-advanced">
+      <summary>Указать площадку вручную (обычно не нужно)</summary>
+      <label class="field">
+        <span class="field-label">Площадка</span>
+        <select name="marketplace">
+          <option value="">— определить автоматически —</option>
+          {% for m in marketplaces %}
+          <option value="{{ m.value }}">{{ marketplace_label(m.value) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </details>
+
+    <div class="upload-actions">
+      <button type="submit" data-loading-text="Импортируем файл…">Импортировать</button>
+    </div>
+  </form>
+</section>
 
 <script>
-  // При отправке формы импорта блокируем кнопку и показываем спиннер —
-  // выгрузка каталога по API может идти долго, нужна обратная связь.
+  // Показ имени выбранного файла в зоне загрузки.
+  (function () {
+    const input = document.getElementById("file-input");
+    const text = document.getElementById("dropzone-text");
+    const zone = document.getElementById("dropzone");
+    if (input) {
+      input.addEventListener("change", function () {
+        if (input.files.length) {
+          text.textContent = input.files[0].name;
+          zone.classList.add("has-file");
+        } else {
+          text.textContent = "Нажмите, чтобы выбрать файл";
+          zone.classList.remove("has-file");
+        }
+      });
+    }
+  })();
+
+  // При отправке форм импорта блокируем кнопку и показываем спиннер —
+  // выгрузка по API может идти долго, нужна обратная связь.
   for (const form of document.querySelectorAll(".js-loading-form")) {
     form.addEventListener("submit", function () {
       const btn = form.querySelector("button[type=submit]");
       if (!btn) return;
       btn.disabled = true;
       btn.classList.add("is-loading");
-      const text = btn.dataset.loadingText || "Загружаем…";
-      btn.innerHTML = '<span class="spinner"></span>' + text;
+      btn.innerHTML = '<span class="spinner"></span>' + (btn.dataset.loadingText || "Загружаем…");
     });
   }
+
+  // Крестики уведомлений.
+  document.querySelectorAll(".notice-close").forEach(function (b) {
+    b.addEventListener("click", function () {
+      const n = b.closest(".notice");
+      n.classList.add("closing");
+      setTimeout(() => n.remove(), 260);
+    });
+  });
 </script>
 {% endblock %}
