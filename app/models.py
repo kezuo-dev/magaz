@@ -80,14 +80,6 @@ class Book(Base):
     width_mm: Mapped[int | None] = mapped_column(Integer, default=None)
     height_mm: Mapped[int | None] = mapped_column(Integer, default=None)
 
-    # Момент, когда книга перестала продаваться (продана/снята). Служит точкой
-    # отсчёта отложенного переноса в архив. None — книга активна.
-    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-    # Момент фактического переноса в архив. None — книга в основном каталоге.
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None, index=True
-    )
-
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

@@ -16,7 +16,6 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 
-from app.archive import sweep_to_archive
 from app.catalog_sync import sync_all, watch_all_stocks
 from app.config import settings
 from app.db import SessionLocal
@@ -42,16 +41,6 @@ def poll_all_marketplaces() -> None:
             except Exception:  # noqa: BLE001 — один сбой не должен останавливать остальные площадки
                 db.rollback()
                 logger.exception("Сбой опроса заказов %s", marketplace)
-
-        # После обработки заказов переносим в архив всё, у чего истекло окно ожидания.
-        try:
-            moved = sweep_to_archive(db)
-            db.commit()
-            if moved:
-                logger.info("Перенесено в архив книг: %s", moved)
-        except Exception:  # noqa: BLE001
-            db.rollback()
-            logger.exception("Сбой переноса книг в архив")
     finally:
         db.close()
 

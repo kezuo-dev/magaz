@@ -38,8 +38,6 @@ def ensure_schema() -> None:
         return  # таблицу создаст create_all со всеми колонками сразу
     existing = {col["name"] for col in inspector.get_columns("books")}
     additions = {
-        "removed_at": "ALTER TABLE books ADD COLUMN removed_at DATETIME",
-        "archived_at": "ALTER TABLE books ADD COLUMN archived_at DATETIME",
         "ozon_category_id": "ALTER TABLE books ADD COLUMN ozon_category_id VARCHAR(32)",
         "ozon_type_id": "ALTER TABLE books ADD COLUMN ozon_type_id VARCHAR(32)",
         "wb_subject_id": "ALTER TABLE books ADD COLUMN wb_subject_id VARCHAR(32)",

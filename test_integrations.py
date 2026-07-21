@@ -289,7 +289,6 @@ with SessionLocal() as s:
     assert gone.status == BookStatus.WITHDRAWN, "пропавшая книга не снята"
     lot = s.query(Listing).filter_by(book_id=gone.id, marketplace="ozon").one()
     assert lot.status == ListingStatus.WITHDRAWN, "лот пропавшей книги не снят"
-    assert gone.removed_at is not None, "не запущено окно до архива"
     alive = s.query(Book).filter_by(sku="OZ-1").one()
     assert alive.status == BookStatus.IN_STOCK, "живая книга ошибочно снята"
 print("[ok] сверка Ozon: пропавшая книга снята, живая не тронута")
@@ -410,7 +409,6 @@ with SessionLocal() as s:
     lot = s.query(Listing).filter_by(marketplace="ozon", external_id="W-2").one()
     lot.status = ListingStatus.ACTIVE
     b2.status = BookStatus.IN_STOCK
-    b2.removed_at = None
     s.commit()
 _fake_wb_stocks = [{"sku": "wb-b1", "amount": 5}]  # WB знает только про W-1
 with SessionLocal() as s:
@@ -498,41 +496,54 @@ with SessionLocal() as s:
     some_id = s.query(Book).filter_by(sku="OZ-1").one().id
 r = c.get(f"/books/{some_id}")
 assert r.status_code == 200 and "только просмотр" in r.text.lower(), "карточка не в режиме просмотра"
-assert "<form" not in r.text.split("Площадки")[0] or "books/save" not in r.text, "в карточке осталась форма сохранения"
+assert 'action="/books/save"' not in r.text, "в карточке осталась форма сохранения"
+assert 'action="/books/bulk"' not in r.text, "в карточке остались массовые действия"
 print("[ok] карточка книги — только просмотр, без формы редактирования")
 
 
-# --- 13. Ручное снятие и архив --------------------------------------------
+# --- 13. Каталог — чистый мониторинг: массовых действий и архива нет --------
 
-from datetime import timedelta
-from app.archive import sweep_to_archive, days_until_archive
-from app.models import utcnow
+r = c.get("/")
+assert 'action="/books/bulk"' not in r.text, "в каталоге осталась форма массовых действий"
+assert "rowcheck" not in r.text, "в каталоге остались чекбоксы строк"
+assert 'href="/archive"' not in r.text, "в меню осталась ссылка на архив"
+# Роут массовых действий удалён.
+assert c.post("/books/bulk", data={"action": "withdraw", "book_ids": [some_id]},
+              follow_redirects=False).status_code in (404, 405), "роут /books/bulk ещё жив"
+# Роут архива удалён.
+assert c.get("/archive", follow_redirects=False).status_code in (404, 405, 303), "роут /archive ещё жив"
+print("[ok] каталог — чистый мониторинг: нет массовых действий и архива")
 
-bid_arch = make_book("ARCH-1", marketplaces=("ozon",))
-c.post("/books/bulk", data={"action": "withdraw", "book_ids": [bid_arch]}, follow_redirects=True)
+
+# --- 14. Очистка каталога не падает при ссылках SyncLog->books --------------
+# Это была причина краша: SyncLog.book_id (FK) не чистился, и DELETE books падал.
+
+WIPE_PW = os.environ.get("WIPE_PASSWORD", "2601")
 with SessionLocal() as s:
-    b = s.get(Book, bid_arch)
-    assert b.status == BookStatus.WITHDRAWN and b.removed_at is not None and b.archived_at is None
-    assert days_until_archive(b) is not None
-assert "ARCH-1" in c.get("/").text and "ARCH-1" not in c.get("/archive").text
-print("[ok] снятая книга ждёт в каталоге с обратным отсчётом")
-
-with SessionLocal() as s:
-    b = s.get(Book, bid_arch)
-    b.removed_at = utcnow() - timedelta(days=999)
+    b = Book(sku="WIPE-1", title="К удалению", status=BookStatus.IN_STOCK, price=10)
+    s.add(b)
+    s.flush()
+    s.add(Listing(book_id=b.id, marketplace="ozon", external_id="WIPE-1", status=ListingStatus.ACTIVE))
+    # Запись журнала со ссылкой на книгу — ровно то, что рушило очистку.
+    s.add(SyncLog(marketplace="ozon", book_id=b.id, action="test", ok=True, message="ref"))
+    s.add(Order(marketplace="ozon", external_order_id="WIPE-ORD", book_id=b.id, processed=True))
     s.commit()
-with SessionLocal() as s:
-    assert sweep_to_archive(s) == 1
-    s.commit()
-assert "ARCH-1" not in c.get("/").text and "ARCH-1" in c.get("/archive").text
-print("[ok] по истечении окна книга уезжает в архив")
 
-c.post("/books/bulk", data={"action": "restore", "book_ids": [bid_arch]}, follow_redirects=True)
+# Неверный пароль — ничего не удаляется.
+r = c.post("/catalog/wipe", data={"password": "0000"}, follow_redirects=True)
 with SessionLocal() as s:
-    b = s.get(Book, bid_arch)
-    assert b.archived_at is None and b.removed_at is None
-assert "ARCH-1" in c.get("/").text
-print("[ok] книгу можно вернуть из архива")
+    assert s.query(Book).count() > 0, "книги удалены при неверном пароле!"
+
+# Верный пароль — всё чистится без 500 (даже при ссылках из SyncLog/Order).
+r = c.post("/catalog/wipe", data={"password": WIPE_PW}, follow_redirects=True)
+assert r.status_code == 200, f"очистка вернула {r.status_code} (краш?)"
+assert "полностью очищен" in r.text, "нет подтверждения очистки"
+with SessionLocal() as s:
+    assert s.query(Book).count() == 0, "книги остались после очистки"
+    assert s.query(SyncLog).count() == 0, "журнал не очищен"
+    assert s.query(Order).count() == 0, "заказы не очищены"
+    assert s.query(Listing).count() == 0, "лоты не очищены"
+print("[ok] очистка каталога не падает при ссылках SyncLog/Order и чистит всё")
 
 
 # --- Чистка ---------------------------------------------------------------

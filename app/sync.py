@@ -27,7 +27,6 @@ from app.models import (
     SyncLog,
 )
 from app.models import utcnow
-from app.archive import mark_removed
 from app.security import decrypt_credentials
 
 
@@ -148,7 +147,6 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
 
         if book:
             book.status = BookStatus.SOLD
-            mark_removed(book)  # запускаем окно до переноса в архив
             # Помечаем лот на этой площадке проданным и снимаем с остальных.
             sold_listing = next((l for l in book.listings if l.marketplace == marketplace), None)
             if sold_listing:

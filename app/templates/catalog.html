@@ -1,33 +1,62 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head">
-  <h1>Каталог <span class="muted">({{ total }} книг)</span></h1>
+  <div>
+    <h1>Каталог</h1>
+    <p class="page-sub muted">Мониторинг книг на Ozon и Wildberries — только просмотр.</p>
+  </div>
   <div class="head-actions">
     <form method="post" action="/import/sync" class="inline-form js-loading-form">
       <button type="submit" data-loading-text="Сверяем каталог…">🔄 Обновить каталог</button>
     </form>
-    <button type="button" class="danger" onclick="document.getElementById('wipe-box').hidden = false">Очистить каталог</button>
+    <button type="button" class="ghost-danger" onclick="document.getElementById('wipe-box').hidden = false">Очистить</button>
   </div>
 </div>
 
 {% if wiped %}<div class="notice ok">Каталог полностью очищен.</div>{% endif %}
-{% if wipe_error %}<div class="notice err">Неверный пароль. Каталог не тронут.</div>{% endif %}
-{% if synced %}<div class="notice ok">Каталог сверен с площадками: {{ synced }}</div>{% endif %}
+{% if wipe_error %}<div class="notice err">Не удалось очистить каталог: неверный пароль или ошибка базы. Данные не тронуты.</div>{% endif %}
+{% if synced %}<div class="notice ok">Каталог сверён с площадками: {{ synced }}</div>{% endif %}
+
+<div class="stats">
+  <div class="stat-card">
+    <div class="stat-num">{{ stats.total }}</div>
+    <div class="stat-label">Всего книг</div>
+  </div>
+  <div class="stat-card stat-ok">
+    <div class="stat-num">{{ stats.in_stock }}</div>
+    <div class="stat-label">В наличии</div>
+  </div>
+  <div class="stat-card stat-muted">
+    <div class="stat-num">{{ stats.gone }}</div>
+    <div class="stat-label">Продано / снято</div>
+  </div>
+  <div class="stat-card stat-mp">
+    <div class="stat-num">{{ stats.on_ozon }}</div>
+    <div class="stat-label">На Ozon</div>
+  </div>
+  <div class="stat-card stat-mp">
+    <div class="stat-num">{{ stats.on_wb }}</div>
+    <div class="stat-label">На Wildberries</div>
+  </div>
+</div>
 
 <div id="wipe-box" class="wipe-box" hidden>
-  <form method="post" action="/catalog/wipe" onsubmit="return confirm('Удалить ВСЕ книги, лоты и заказы из программы без возможности восстановления?\n\nНа Ozon и других площадках товары НЕ будут затронуты.')">
+  <form method="post" action="/catalog/wipe" onsubmit="return confirm('Удалить ВСЕ книги, лоты, заказы и журнал из программы без возможности восстановления?\n\nНа Ozon и Wildberries товары НЕ будут затронуты.')">
     <b>Очистка каталога в программе</b>
-    <p class="muted">Удаляет все книги, лоты, заказы и загруженные фото <b>только в этой программе</b>. Каталог на Ozon и других площадках не затрагивается. Действие необратимо.</p>
+    <p class="muted">Удаляет все книги, лоты, заказы, журнал и загруженные фото <b>только в этой программе</b>. Каталог на площадках не затрагивается. Действие необратимо.</p>
     <div class="wipe-row">
       <input type="password" name="password" placeholder="Пароль очистки" required autocomplete="off">
       <button type="submit" class="danger">Удалить всё</button>
-      <button type="button" onclick="document.getElementById('wipe-box').hidden = true">Отмена</button>
+      <button type="button" class="secondary" onclick="document.getElementById('wipe-box').hidden = true">Отмена</button>
     </div>
   </form>
 </div>
 
-<form method="get" action="/" class="filters">
-  <input type="text" name="q" value="{{ q }}" placeholder="Поиск: название, SKU, ISBN">
+<form method="get" action="/" class="toolbar">
+  <div class="search-field">
+    <span class="search-icon">🔍</span>
+    <input type="text" name="q" value="{{ q }}" placeholder="Поиск по названию, артикулу или ISBN">
+  </div>
   <select name="status">
     <option value="">Все статусы</option>
     {% for s in statuses %}
@@ -43,94 +72,74 @@
   <button type="submit">Искать</button>
 </form>
 
-<form method="post" action="/books/bulk">
-  <div class="bulk-bar">
-    <label>С отмеченными:</label>
-    <button type="submit" name="action" value="withdraw" data-confirm="Снять отмеченные книги с продажи на всех площадках?">Снять</button>
-    <button type="submit" name="action" value="mark_sold" class="danger" data-confirm="Отметить отмеченные книги проданными? Они будут сняты со всех площадок.">Отметить проданными</button>
-    <button type="submit" name="action" value="archive" class="secondary" data-confirm="Убрать отмеченные книги в архив сейчас, не дожидаясь автопереноса?">В архив</button>
-  </div>
-
+<div class="table-wrap">
   <table class="grid">
     <thead>
       <tr>
-        <th></th>
         <th>Артикул</th>
         <th>Название</th>
-        <th>Цена</th>
+        <th class="col-price">Цена</th>
         <th>Статус</th>
         <th>Площадки</th>
       </tr>
     </thead>
     <tbody>
       {% for book in books %}
-      <tr>
-        <td><input type="checkbox" class="rowcheck" name="book_ids" value="{{ book.id }}"></td>
+      <tr onclick="location.href='/books/{{ book.id }}'" class="clickable">
         <td class="mono">{{ book.sku }}</td>
-        <td><a href="/books/{{ book.id }}">{{ book.title }}</a></td>
-        <td>{{ "%.0f"|format(book.price) if book.price else "—" }}</td>
-        <td>
-          <span class="badge badge-{{ book.status }}">{{ book_status_label(book.status) }}</span>
-          {% set days = days_until_archive(book) %}
-          {% if days is not none %}
-          <div class="archive-hint">🗄 в архив {% if days > 0 %}через {{ days }} дн.{% else %}скоро{% endif %}</div>
-          {% endif %}
-        </td>
+        <td class="col-title"><a href="/books/{{ book.id }}">{{ book.title }}</a></td>
+        <td class="col-price">{{ "%.0f ₽"|format(book.price) if book.price else "—" }}</td>
+        <td><span class="badge badge-{{ book.status }}">{{ book_status_label(book.status) }}</span></td>
         <td class="mp-cells">
           {% for l in book.listings %}
-          <span class="mp mp-{{ l.status }}" title="{{ l.marketplace }}: {{ listing_status_label(l.status) }}">{{ l.marketplace[:2]|upper }}</span>
+          <span class="mp mp-{{ l.status }}" title="{{ marketplace_label(l.marketplace) }}: {{ listing_status_label(l.status) }}">{{ l.marketplace[:2]|upper }}</span>
+          {% else %}
+          <span class="muted">—</span>
           {% endfor %}
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="muted center">Ничего не найдено. Загрузите каталог через «Импорт».</td></tr>
+      <tr><td colspan="5" class="empty">
+        <div class="empty-box">
+          <div class="empty-icon">📚</div>
+          <div>Каталог пуст. Нажмите «Обновить каталог» или загрузите выгрузку через «Обновление каталога».</div>
+        </div>
+      </td></tr>
       {% endfor %}
     </tbody>
   </table>
-</form>
+</div>
 
-<script>
-  // Подтверждение массовых действий + защита от пустого выбора.
-  for (const btn of document.querySelectorAll(".bulk-bar button[data-confirm]")) {
-    btn.addEventListener("click", function (e) {
-      const checked = document.querySelectorAll(".rowcheck:checked").length;
-      if (checked === 0) {
-        e.preventDefault();
-        alert("Сначала отметьте книги галочками.");
-        return;
-      }
-      if (!confirm(this.dataset.confirm + "\nОтмечено книг: " + checked)) {
-        e.preventDefault();
-      }
-    });
-  }
-
-  // Кнопка «Обновить каталог» может идти долго — показываем спиннер.
-  for (const form of document.querySelectorAll(".js-loading-form")) {
-    form.addEventListener("submit", function () {
-      const btn = form.querySelector("button[type=submit]");
-      if (!btn) return;
-      btn.disabled = true;
-      const text = btn.dataset.loadingText || "Загружаем…";
-      btn.textContent = text;
-    });
-  }
-</script>
+<div class="list-foot muted">Показано {{ books|length }} из {{ total }} книг</div>
 
 {% if pages > 1 %}
 <div class="pager">
-  {% if page > 1 %}<a href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page-1 }}">← Назад</a>{% endif %}
+  {% if page > 1 %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page-1 }}">← Назад</a>{% endif %}
   <span>Стр. {{ page }} из {{ pages }}</span>
-  {% if page < pages %}<a href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page+1 }}">Вперёд →</a>{% endif %}
+  {% if page < pages %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page+1 }}">Вперёд →</a>{% endif %}
   <form method="get" action="/" class="pager-go">
     <input type="hidden" name="q" value="{{ q }}">
     <input type="hidden" name="status" value="{{ status }}">
     <input type="hidden" name="marketplace" value="{{ marketplace }}">
-    <label>Перейти к стр.
+    <label>Стр.
       <input type="number" name="page" value="{{ page }}" min="1" max="{{ pages }}">
     </label>
     <button type="submit">ОК</button>
   </form>
 </div>
 {% endif %}
+
+<script>
+  // Кнопка «Обновить каталог» может идти долго — показываем состояние загрузки.
+  for (const form of document.querySelectorAll(".js-loading-form")) {
+    form.addEventListener("submit", function () {
+      const btn = form.querySelector("button[type=submit]");
+      if (!btn) return;
+      btn.disabled = true;
+      btn.classList.add("is-loading");
+      const text = btn.dataset.loadingText || "Загружаем…";
+      btn.innerHTML = '<span class="spinner"></span>' + text;
+    });
+  }
+</script>
 {% endblock %}

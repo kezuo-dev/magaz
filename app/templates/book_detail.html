@@ -1,68 +1,70 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head">
-  <h1>{{ book.title }}</h1>
+  <div>
+    <h1>{{ book.title }}</h1>
+    <p class="page-sub muted">Карточка книги — только просмотр. Данные обновляются при сверке с площадками.</p>
+  </div>
   <div class="head-actions">
-    <a href="/" class="btn-ghost">← К каталогу</a>
+    <a href="/" class="btn muted">← К каталогу</a>
   </div>
 </div>
 
-<p class="muted">Карточка книги — только просмотр. Данные подтягиваются автоматически при сверке с площадками.</p>
-
-<div class="book-detail">
-  <table class="grid">
-    <tbody>
-      <tr><th>Артикул (SKU)</th><td class="mono">{{ book.sku }}</td></tr>
-      <tr><th>Название</th><td>{{ book.title }}</td></tr>
-      <tr><th>Автор</th><td>{{ book.author or "—" }}</td></tr>
-      <tr><th>ISBN</th><td>{{ book.isbn or "—" }}</td></tr>
-      <tr><th>Издательство</th><td>{{ book.publisher or "—" }}</td></tr>
-      <tr><th>Год</th><td>{{ book.year or "—" }}</td></tr>
-      <tr><th>Состояние</th><td>{{ book.condition or "—" }}</td></tr>
-      <tr><th>Цена, ₽</th><td>{{ "%.2f"|format(book.price) if book.price else "—" }}</td></tr>
-      <tr><th>Количество</th><td>{{ book.quantity }}</td></tr>
-      <tr>
-        <th>Статус</th>
-        <td>
-          <span class="badge badge-{{ book.status }}">{{ book_status_label(book.status) }}</span>
-          {% set days = days_until_archive(book) %}
-          {% if days is not none %}
-          <span class="archive-hint">🗄 в архив {% if days > 0 %}через {{ days }} дн.{% else %}скоро{% endif %}</span>
-          {% endif %}
-        </td>
-      </tr>
-    </tbody>
-  </table>
-
-  {% if book.description %}
-  <h2>Описание</h2>
-  <p>{{ book.description }}</p>
-  {% endif %}
+<div class="detail-grid">
+  <section class="card">
+    <h2 class="card-title">Сведения</h2>
+    <dl class="prop-list">
+      <dt>Артикул (SKU)</dt><dd class="mono">{{ book.sku }}</dd>
+      <dt>Автор</dt><dd>{{ book.author or "—" }}</dd>
+      <dt>ISBN</dt><dd class="mono">{{ book.isbn or "—" }}</dd>
+      <dt>Издательство</dt><dd>{{ book.publisher or "—" }}</dd>
+      <dt>Год</dt><dd>{{ book.year or "—" }}</dd>
+      <dt>Состояние</dt><dd>{{ book.condition or "—" }}</dd>
+      <dt>Цена</dt><dd>{{ "%.0f ₽"|format(book.price) if book.price else "—" }}</dd>
+      <dt>Количество</dt><dd>{{ book.quantity }}</dd>
+      <dt>Статус</dt><dd><span class="badge badge-{{ book.status }}">{{ book_status_label(book.status) }}</span></dd>
+    </dl>
+  </section>
 
   {% if book.photo_list %}
-  <h2>Фотографии</h2>
-  <div class="photo-grid">
-    {% for url in book.photo_list %}
-    <a href="{{ url }}" target="_blank" class="photo-thumb"><img src="{{ url }}" alt="фото"></a>
-    {% endfor %}
-  </div>
+  <section class="card">
+    <h2 class="card-title">Фотографии</h2>
+    <div class="photo-grid">
+      {% for url in book.photo_list %}
+      <a href="{{ url }}" target="_blank" class="photo-thumb"><img src="{{ url }}" alt="фото" loading="lazy"></a>
+      {% endfor %}
+    </div>
+  </section>
   {% endif %}
 </div>
 
-{% if book.listings %}
-<h2>Площадки</h2>
-<table class="grid">
-  <thead><tr><th>Площадка</th><th>ID лота</th><th>Статус</th><th>Синхронизация</th></tr></thead>
-  <tbody>
-    {% for l in book.listings %}
-    <tr>
-      <td>{{ marketplace_label(l.marketplace) }}</td>
-      <td class="mono">{{ l.external_id or "—" }}</td>
-      <td><span class="mp mp-{{ l.status }}">{{ listing_status_label(l.status) }}</span></td>
-      <td class="muted">{{ l.last_synced_at.strftime("%d.%m %H:%M") if l.last_synced_at else "—" }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+{% if book.description %}
+<section class="card">
+  <h2 class="card-title">Описание</h2>
+  <p class="descr">{{ book.description }}</p>
+</section>
 {% endif %}
+
+<section class="card">
+  <h2 class="card-title">Площадки</h2>
+  {% if book.listings %}
+  <div class="table-wrap">
+    <table class="grid">
+      <thead><tr><th>Площадка</th><th>ID лота</th><th>Статус</th><th>Синхронизация</th></tr></thead>
+      <tbody>
+        {% for l in book.listings %}
+        <tr>
+          <td>{{ marketplace_label(l.marketplace) }}</td>
+          <td class="mono">{{ l.external_id or "—" }}</td>
+          <td><span class="badge badge-listing-{{ l.status }}">{{ listing_status_label(l.status) }}</span></td>
+          <td class="muted">{{ l.last_synced_at.strftime("%d.%m.%Y %H:%M") if l.last_synced_at else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Книга ещё не привязана ни к одной площадке.</p>
+  {% endif %}
+</section>
 {% endblock %}

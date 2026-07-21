@@ -28,7 +28,6 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.archive import mark_removed
 from app.marketplaces import MarketplaceError, get_client, is_supported
 from app.models import (
     Book,
@@ -74,15 +73,14 @@ def _parse_stock(raw) -> int | None:
 def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing) -> None:
     """Единый путь снятия книги, пропавшей/проданной на площадке `marketplace`.
 
-    Помечаем лот этой площадки снятым (остатка там уже нет — живой вызов не нужен),
-    кросс-снимаем с остальных площадок и запускаем окно до архива.
+    Помечаем лот этой площадки снятым (остатка там уже нет — живой вызов не нужен)
+    и кросс-снимаем с остальных площадок.
     """
     listing.status = ListingStatus.WITHDRAWN
     listing.last_synced_at = utcnow()
     withdraw_book_everywhere(db, book, except_marketplace=marketplace)
     if book.status == BookStatus.IN_STOCK:
         book.status = BookStatus.WITHDRAWN
-    mark_removed(book)
 
 
 def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping: dict) -> dict:
@@ -207,7 +205,7 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
     removed = 0
     for listing in listings:
         book = listing.book
-        if book is None or book.archived_at is not None:
+        if book is None:
             continue
         # Книга всё ещё в живой выгрузке — ничего не делаем.
         if book.sku in live_skus:
@@ -347,7 +345,7 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
     removed = 0
     for listing in keyed:
         book = listing.book
-        if book is None or book.archived_at is not None:
+        if book is None:
             continue
         # Ключ не вернулся (карточки нет) ИЛИ остаток обнулён — снимаем.
         amount = stocks.get(listing.stock_key)
