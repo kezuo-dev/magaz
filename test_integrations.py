@@ -480,6 +480,25 @@ _fake_wb_stocks = []
 print("[ok] кнопка «Обновить каталог» сверяет все площадки и снимает пропавшее")
 
 
+# --- 10b. Новые карточки с нулевым остатком не загружаются ------------------
+# На WB висят сотни давно снятых карточек (остаток 0, но карточка есть) — их не
+# заводим. Новую с остатком заводим, новую с нулём — пропускаем.
+_fake_wb_cards = [
+    {"vendorCode": "WB-LIVE-2", "title": "Живая новая", "brand": "И", "sizes": [{"price": 100, "skus": ["live2"]}]},
+    {"vendorCode": "WB-ZERO-1", "title": "Снятая карточка", "brand": "И", "sizes": [{"price": 100, "skus": ["zero1"]}]},
+]
+_fake_wb_stocks = [{"sku": "live2", "amount": 4}, {"sku": "zero1", "amount": 0}]  # zero1 явно 0
+with SessionLocal() as s:
+    from app.catalog_sync import sync_marketplace as _sync
+    _sync(s, "wildberries"); s.commit()
+with SessionLocal() as s:
+    assert s.query(Book).filter_by(sku="WB-LIVE-2").count() == 1, "новая книга с остатком не создана"
+    assert s.query(Book).filter_by(sku="WB-ZERO-1").count() == 0, "новая карточка с нулём не должна попадать в каталог"
+_fake_wb_cards = []
+_fake_wb_stocks = []
+print("[ok] сверка: новые карточки с нулевым остатком не загружаются")
+
+
 # --- 11. Импорт файлом (CSV) не снимает отсутствующие ----------------------
 
 import io

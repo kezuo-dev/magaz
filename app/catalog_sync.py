@@ -123,6 +123,14 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
         raw_key = row.get("stock_key")
         stock_key = str(raw_key).strip() if raw_key not in (None, "") else None
 
+        # Карточку с нулевым остатком, которой у нас ещё нет, НЕ заводим: на
+        # площадках висят сотни давно снятых карточек (остаток 0, но карточка
+        # существует) — им не место в каталоге. При этом уже известную книгу,
+        # ушедшую в 0, обрабатываем ниже как реальное снятие/продажу.
+        if book is None and out_of_stock:
+            skipped += 1
+            continue
+
         if book:
             updated += 1
         else:
