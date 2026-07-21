@@ -10,6 +10,8 @@
 
 <div class="notice-stack">
   {% if saved %}<div class="notice ok"><span>Настройки «{{ marketplace_label(saved) }}» сохранены.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if withdraw == 'on' %}<div class="notice ok"><span>Автоснятие включено — программа снимает проданные книги с других площадок.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if withdraw == 'off' %}<div class="notice ok"><span>Автоснятие выключено — программа только показывает статусы, ничего не снимает.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
   {% if checked %}
     {% set mp, status = checked.split(':') %}
     {% if status == 'ok' %}
@@ -19,6 +21,30 @@
     {% endif %}
   {% endif %}
 </div>
+
+<div class="kill-switch {{ 'on' if auto_withdraw else 'off' }}">
+  <div class="kill-switch-text">
+    <div class="kill-switch-title">
+      <span class="kill-switch-icon">{{ '🟢' if auto_withdraw else '⏸️' }}</span>
+      Автоматическое снятие с продажи
+    </div>
+    <p class="muted">
+      {% if auto_withdraw %}
+        Включено. Когда книга продаётся или пропадает на одной площадке, программа автоматически снимает её с остальных.
+      {% else %}
+        Выключено. Программа тянет каталог и показывает все статусы, но <b>не снимает</b> книги с площадок. Включите, когда будете готовы к боевому режиму.
+      {% endif %}
+    </p>
+  </div>
+  <form method="post" action="/settings/auto-withdraw" class="kill-switch-form">
+    <input type="hidden" name="enabled" value="{{ 'off' if auto_withdraw else 'on' }}">
+    <button type="submit" class="{{ 'danger' if auto_withdraw else '' }}">
+      {{ 'Выключить' if auto_withdraw else 'Включить снятие' }}
+    </button>
+  </form>
+</div>
+
+<h2 class="section-h">Площадки</h2>
 
 <div class="mp-settings">
   {% for card in cards %}

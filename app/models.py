@@ -160,3 +160,19 @@ class MarketplaceAccount(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class AppSetting(Base):
+    """Простое key-value хранилище глобальных настроек приложения.
+
+    Нужно для переключателей, которые меняются в UI на лету (в отличие от .env,
+    который читается только при старте). Пока хранит один флаг — «Автоснятие».
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

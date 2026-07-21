@@ -94,12 +94,29 @@ def withdraw_book(db: Session, book: Book, marketplace: str) -> bool:
 
 
 def withdraw_book_everywhere(db: Session, book: Book, *, except_marketplace: str | None = None) -> None:
-    """Снять книгу со всех площадок, кроме указанной (обычно — той, где продалась)."""
-    for listing in list(book.listings):
-        if except_marketplace and listing.marketplace == except_marketplace:
-            continue
-        if listing.status in (ListingStatus.WITHDRAWN,):
-            continue
+    """Снять книгу со всех площадок, кроме указанной (обычно — той, где продалась).
+
+    Единая точка авто-снятия для всех механизмов (заказы, сверка, слежение).
+    Если рубильник «Автоснятие» в Настройках выключен — ничего не делаем: лоты на
+    других площадках остаются активными (книга там реально продолжает продаваться),
+    а в журнал пишется пропуск, чтобы было видно, что автоматика заметила продажу.
+    """
+    from app.flags import is_auto_withdraw_enabled  # локальный импорт против цикла
+
+    targets = [
+        l for l in book.listings
+        if not (except_marketplace and l.marketplace == except_marketplace)
+        and l.status not in (ListingStatus.WITHDRAWN,)
+    ]
+    if not targets:
+        return
+
+    if not is_auto_withdraw_enabled(db):
+        _log(db, marketplace=None, action="withdraw_skipped", ok=True, book_id=book.id,
+             message=f"Книга {book.sku}: автоснятие выключено — лоты на других площадках не тронуты")
+        return
+
+    for listing in targets:
         withdraw_book(db, book, listing.marketplace)
 
 
@@ -155,7 +172,7 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
             withdraw_book_everywhere(db, book, except_marketplace=marketplace)
             order.processed = True
             _log(db, marketplace=marketplace, action="order_sold", ok=True, book_id=book.id,
-                 message=f"Заказ {info.external_order_id}: книга {book.sku} продана, снята с остальных площадок")
+                 message=f"Заказ {info.external_order_id}: книга {book.sku} продана на {marketplace}")
         else:
             _log(db, marketplace=marketplace, action="order_unmatched", ok=False,
                  message=f"Заказ {info.external_order_id}: книга по SKU «{info.external_sku}» не найдена")

@@ -34,6 +34,18 @@ c = TestClient(app)
 c.post("/login", data={"password": APP_PW})
 
 
+def set_auto_withdraw(on: bool):
+    """Переключить глобальный рубильник автоснятия прямо в базе (для тестов)."""
+    from app.flags import set_auto_withdraw as _set
+    with SessionLocal() as s:
+        _set(s, on)
+        s.commit()
+
+
+# Большинство проверок рассчитывают на кросс-снятие — включаем боевой режим.
+set_auto_withdraw(True)
+
+
 def unlock(section="/settings"):
     """Разблокировать защищённый раздел прямо перед обращением к нему (разово)."""
     c.post("/admin-login", data={"password": ADMIN_PW, "next": section}, follow_redirects=False)
@@ -567,6 +579,54 @@ assert item["listings"][0]["short"] == "WB", f"метка площадки {item
 # Пустой запрос по мусору — ничего.
 assert c.get("/api/books?q=неттакойкниги000").json()["total"] == 0, "поиск нашёл несуществующее"
 print("[ok] живой поиск: JSON-API фильтрует, метка площадки — WB")
+
+
+# --- 16. Рубильник автоснятия: выкл — не снимаем, вкл — снимаем -------------
+
+# Книга на двух площадках, продажа приходит с Ozon.
+def _make_two_mp(sku):
+    with SessionLocal() as s:
+        b = Book(sku=sku, title="Рубильник", status=BookStatus.IN_STOCK, price=100)
+        s.add(b); s.flush()
+        s.add(Listing(book_id=b.id, marketplace="ozon", external_id=sku, stock_key=sku, status=ListingStatus.ACTIVE))
+        s.add(Listing(book_id=b.id, marketplace="wildberries", external_id=sku, stock_key=sku, status=ListingStatus.ACTIVE))
+        s.commit()
+        return b.id
+
+from app.sync import poll_marketplace_orders
+
+# ВЫКЛ: продажа на Ozon НЕ снимает книгу с WB (только мониторинг).
+set_auto_withdraw(False)
+off_id = _make_two_mp("SWITCH-OFF")
+_fake_orders["postings"] = [{"posting_number": "OFF-ORDER", "products": [{"offer_id": "SWITCH-OFF"}]}]
+with SessionLocal() as s:
+    poll_marketplace_orders(s, "ozon"); s.commit()
+with SessionLocal() as s:
+    wb_l = s.query(Listing).filter_by(book_id=off_id, marketplace="wildberries").one()
+    assert wb_l.status == ListingStatus.ACTIVE, "при ВЫКЛ рубильнике WB не должна сниматься"
+print("[ok] рубильник ВЫКЛ: продажа на Ozon не снимает книгу с WB")
+
+# ВКЛ: та же ситуация снимает книгу с WB.
+set_auto_withdraw(True)
+on_id = _make_two_mp("SWITCH-ON")
+_fake_orders["postings"] = [{"posting_number": "ON-ORDER", "products": [{"offer_id": "SWITCH-ON"}]}]
+with SessionLocal() as s:
+    poll_marketplace_orders(s, "ozon"); s.commit()
+with SessionLocal() as s:
+    wb_l = s.query(Listing).filter_by(book_id=on_id, marketplace="wildberries").one()
+    assert wb_l.status == ListingStatus.WITHDRAWN, "при ВКЛ рубильнике WB должна сняться"
+_fake_orders["postings"] = []
+print("[ok] рубильник ВКЛ: продажа на Ozon снимает книгу с WB")
+
+# UI: тумблер в настройках переключается и виден в состоянии.
+unlock("/settings")
+r = c.post("/settings/auto-withdraw", data={"enabled": "off"}, follow_redirects=True)
+assert "Автоснятие выключено" in r.text, "тумблер не выключился через UI"
+unlock("/settings")
+r = c.get("/settings")
+assert "Включить снятие" in r.text, "нет кнопки включения при выключенном автоснятии"
+set_auto_withdraw(True)  # возвращаем для остальных возможных прогонов
+print("[ok] тумблер автоснятия работает через UI")
 
 
 # --- Чистка ---------------------------------------------------------------

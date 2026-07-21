@@ -302,6 +302,21 @@ th.col-price { text-align: right; }
 
 /* ---------- Настройки / импорт ---------- */
 /* ---------- Настройки площадок (редизайн) ---------- */
+/* Рубильник боевого режима (автоснятие). */
+.kill-switch {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 20px 24px; border-radius: var(--radius); margin-bottom: 24px;
+  border: 1px solid var(--line); box-shadow: var(--shadow-sm);
+  transition: background .2s ease, border-color .2s ease;
+}
+.kill-switch.on { background: var(--ok-soft); border-color: #b5e3c4; }
+.kill-switch.off { background: var(--surface); }
+.kill-switch-title { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 700; }
+.kill-switch-icon { font-size: 20px; }
+.kill-switch-text p { margin: 6px 0 0; font-size: 14px; max-width: 640px; }
+.kill-switch-form { flex-shrink: 0; }
+.kill-switch-form button { min-width: 150px; }
+.section-h { margin: 8px 0 16px; font-size: 15px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 .settings-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); transition: box-shadow .15s ease; }
 .settings-card:hover { box-shadow: var(--shadow-md); }

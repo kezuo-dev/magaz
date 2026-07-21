@@ -214,7 +214,7 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
         _cross_withdraw(db, book, marketplace, listing)
         removed += 1
         _log(db, marketplace=marketplace, action="reconcile_removed", ok=True,
-             message=f"Книга {book.sku} пропала с {marketplace} — снята со всех площадок")
+             message=f"Книга {book.sku} пропала с {marketplace}")
 
     return removed
 
@@ -354,7 +354,7 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
             removed += 1
             reason = "остаток 0" if amount is not None else "карточка пропала"
             _log(db, marketplace=marketplace, action="watch_removed", ok=True,
-                 message=f"Книга {book.sku}: {reason} на {marketplace} — снята со всех площадок")
+                 message=f"Книга {book.sku}: {reason} на {marketplace}")
 
     if removed:
         _log(db, marketplace=marketplace, action="watch_stocks", ok=True,
