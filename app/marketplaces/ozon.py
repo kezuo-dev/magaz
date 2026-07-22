@@ -179,12 +179,18 @@ class OzonClient(MarketplaceClient):
         return rows
 
     def fetch_stocks(self, keys: list[str]) -> dict[str, int]:
-        """Остатки FBS по offer_id (ключам остатка). Возвращает {offer_id: остаток}.
+        """Доступный остаток FBS по offer_id (ключам). Возвращает {offer_id: доступно}.
 
-        Дешёвый способ узнать «книга ещё в продаже?» без выгрузки всего каталога:
+        Дешёвый способ узнать «книга ещё продаётся?» без выгрузки всего каталога:
         спрашиваем остатки ровно по нашим SKU пачками (Ozon берёт до 1000 за раз).
         Используем /v4/product/info/stocks. Ключей, которых Ozon не знает, в ответе
         просто не будет — вызывающий код трактует отсутствие как «пропала».
+
+        ВАЖНО: считаем ДОСТУПНОЕ = present − reserved. У книги б/у один экземпляр:
+        как только её покупают, Ozon резервирует его под заказ (present=1, reserved=1),
+        то есть к продаже доступно 0 ещё ДО фактической отгрузки. Если бы мы смотрели
+        только present, продажа замечалась бы с задержкой (после отгрузки) — и всё это
+        время книга висела бы на другой площадке. Вычитание reserved закрывает это окно.
         """
         result: dict[str, int] = {}
         if not keys:
@@ -200,11 +206,13 @@ class OzonClient(MarketplaceClient):
                 offer_id = it.get("offer_id")
                 if not offer_id:
                     continue
-                # Складов может быть несколько (fbo/fbs) — берём суммарный доступный.
+                # Складов может быть несколько (fbo/fbs) — суммируем и вычитаем резерв.
                 present = 0
+                reserved = 0
                 for st in it.get("stocks") or []:
                     present += int(st.get("present") or 0)
-                result[str(offer_id)] = present
+                    reserved += int(st.get("reserved") or 0)
+                result[str(offer_id)] = max(0, present - reserved)
         return result
 
     def fetch_orders(self) -> list[OrderInfo]:

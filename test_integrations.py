@@ -175,9 +175,10 @@ c2 = TestClient(app)
 c2.post("/login", data={"password": APP_PW})
 r = c2.get("/settings", follow_redirects=False)
 assert r.status_code == 303 and "/admin-login" in r.headers["location"], "Настройки открылись без пароля!"
+# Журнал открыт всем вошедшим — там только записи синхронизации, не секреты.
 r = c2.get("/log", follow_redirects=False)
-assert r.status_code == 303 and "/admin-login" in r.headers["location"], "Журнал открылся без пароля!"
-print("[ok] Журнал и Настройки закрыты вторым паролем")
+assert r.status_code == 200, "Журнал должен быть доступен без отдельного пароля"
+print("[ok] Настройки под паролем, Журнал открыт вошедшим")
 
 
 # --- 2. Только две площадки: Ozon и WB, Avito нет --------------------------
@@ -373,24 +374,26 @@ with SessionLocal() as s:
     assert wb1.stock_key == "wb-b1", f"WB stock_key (баркод) не проставлен: {wb1.stock_key}"
 print("[ok] сверка проставляет ключи остатка (Ozon offer_id, WB баркод)")
 
-# Слежение Ozon: у W-1 остаток стал 0 → снять её с обеих площадок; W-2 жива.
+# Слежение Ozon: W-1 куплена — экземпляр зарезервирован под заказ (present=1,
+# reserved=1 → доступно 0). Должна сняться с обеих площадок ДО фактической отгрузки.
+# W-2 свободна (present=3, reserved=0) — живёт.
 _fake_ozon_stocks = {"items": [
-    {"offer_id": "W-1", "stocks": [{"present": 0}]},
-    {"offer_id": "W-2", "stocks": [{"present": 3}]},
+    {"offer_id": "W-1", "stocks": [{"present": 1, "reserved": 1}]},
+    {"offer_id": "W-2", "stocks": [{"present": 3, "reserved": 0}]},
 ]}
 with SessionLocal() as s:
     res = watch_stocks(s, "ozon")
     s.commit()
-    assert res["removed"] == 1, f"ожидали снятие 1 по остатку, {res}"
+    assert res["removed"] == 1, f"ожидали снятие 1 по резерву, {res}"
 with SessionLocal() as s:
     b1 = s.query(Book).filter_by(sku="W-1").one()
-    assert b1.status == BookStatus.WITHDRAWN, "W-1 не снята по нулевому остатку"
+    assert b1.status == BookStatus.WITHDRAWN, "W-1 не снята при резерве (present=reserved=1)"
     # Кросс-снятие: лот на WB тоже снят.
     wb1 = s.query(Listing).filter_by(marketplace="wildberries", external_id="W-1").one()
     assert wb1.status == ListingStatus.WITHDRAWN, "W-1 не снята с WB (кросс-снятие)"
     b2 = s.query(Book).filter_by(sku="W-2").one()
     assert b2.status == BookStatus.IN_STOCK, "W-2 ошибочно снята"
-print("[ok] слежение за остатками: остаток 0 -> снятие с обеих площадок, живая цела")
+print("[ok] слежение Ozon: резерв под заказ (present=reserved) = продано -> снятие с обеих")
 
 # Слежение Ozon: W-2 пропала из ответа остатков (карточку удалили) → снять.
 _fake_ozon_stocks = {"items": []}
