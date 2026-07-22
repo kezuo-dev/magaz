@@ -52,17 +52,18 @@
     <option value="{{ s.value }}" {% if status == s.value %}selected{% endif %}>{{ book_status_label(s.value) }}</option>
     {% endfor %}
   </select>
-  <select name="marketplace" id="filter-marketplace">
-    <option value="">Все площадки</option>
-    {% for m in marketplaces %}
-    <option value="{{ m.value }}" {% if marketplace == m.value %}selected{% endif %}>{{ marketplace_label(m.value) }}</option>
-    {% endfor %}
-  </select>
   <button type="submit" class="btn-search-submit">Искать</button>
 </form>
 
 <div class="table-wrap">
-  <table class="grid">
+  <table class="grid catalog-table">
+    <colgroup>
+      <col class="c-sku">
+      <col class="c-title">
+      <col class="c-price">
+      <col class="c-status">
+      <col class="c-mp">
+    </colgroup>
     <thead>
       <tr>
         <th>Артикул</th>
@@ -103,9 +104,9 @@
 
 {% if pages > 1 %}
 <div class="pager" id="pager">
-  {% if page > 1 %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page-1 }}">← Назад</a>{% endif %}
+  {% if page > 1 %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&page={{ page-1 }}">← Назад</a>{% endif %}
   <span>Стр. {{ page }} из {{ pages }}</span>
-  {% if page < pages %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&marketplace={{ marketplace }}&page={{ page+1 }}">Вперёд →</a>{% endif %}
+  {% if page < pages %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&page={{ page+1 }}">Вперёд →</a>{% endif %}
 </div>
 {% endif %}
 
@@ -188,7 +189,6 @@
   (function () {
     const input = document.getElementById("search-input");
     const statusSel = document.getElementById("filter-status");
-    const mpSel = document.getElementById("filter-marketplace");
     const body = document.getElementById("books-body");
     const countEl = document.getElementById("list-count");
     const spin = document.getElementById("search-spin");
@@ -204,7 +204,7 @@
       if (!items.length) {
         body.innerHTML = '<tr class="empty-row"><td colspan="5" class="empty">' +
           '<div class="empty-box"><div class="empty-icon">🔍</div>' +
-          '<div>Ничего не найдено. Измените запрос или фильтры.</div></div></td></tr>';
+          '<div>Ничего не найдено. Измените запрос или фильтр.</div></div></td></tr>';
         return;
       }
       body.innerHTML = items.map(function (b) {
@@ -223,7 +223,7 @@
     function run() {
       const mySeq = ++seq;
       spin.hidden = false;
-      const params = new URLSearchParams({ q: input.value, status: statusSel.value, marketplace: mpSel.value });
+      const params = new URLSearchParams({ q: input.value, status: statusSel.value });
       fetch("/api/books?" + params.toString())
         .then(r => r.json())
         .then(function (data) {
@@ -241,7 +241,6 @@
 
     input.addEventListener("input", schedule);
     statusSel.addEventListener("change", run);
-    mpSel.addEventListener("change", run);
     // Не перезагружаем страницу по Enter — поиск уже живой.
     document.getElementById("filter-form").addEventListener("submit", function (e) { e.preventDefault(); run(); });
   })();

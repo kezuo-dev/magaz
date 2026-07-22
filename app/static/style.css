@@ -172,11 +172,11 @@ a.btn.muted:hover, .btn.muted:hover { background: #e3e8f0; }
 .toolbar select { min-width: 150px; }
 
 /* ---------- Таблица ---------- */
-.table-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+.table-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; box-shadow: var(--shadow-sm); }
 table.grid { width: 100%; border-collapse: collapse; background: var(--surface); }
-table.grid th, table.grid td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--line); }
+table.grid th, table.grid td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
 table.grid thead th {
-  position: sticky; top: 0; background: var(--surface-2); z-index: 1;
+  background: var(--surface-2);
   font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
 }
 table.grid tbody tr { transition: background .12s ease; }
@@ -184,7 +184,18 @@ table.grid.small th, table.grid.small td { padding: 7px 10px; font-size: 12px; }
 table.grid tbody tr:hover { background: var(--accent-soft); }
 table.grid tbody tr:last-child td { border-bottom: none; }
 table.grid tr.clickable { cursor: pointer; }
-.col-title a { font-weight: 500; color: var(--ink); }
+
+/* Каталог: фиксированные ширины колонок, чтобы ничего не «съезжало». */
+.catalog-table { table-layout: fixed; min-width: 720px; }
+.catalog-table .c-sku { width: 150px; }
+.catalog-table .c-title { width: auto; }
+.catalog-table .c-price { width: 110px; }
+.catalog-table .c-status { width: 130px; }
+.catalog-table .c-mp { width: 110px; }
+.catalog-table td, .catalog-table th { overflow: hidden; }
+.catalog-table td.mono { text-overflow: ellipsis; white-space: nowrap; }
+.col-title { overflow: hidden; }
+.col-title a { font-weight: 500; color: var(--ink); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-title a:hover { color: var(--accent); }
 .col-price { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 th.col-price { text-align: right; }
