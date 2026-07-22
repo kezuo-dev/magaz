@@ -315,7 +315,11 @@ th.col-price { text-align: right; }
 .kill-switch-icon { font-size: 20px; }
 .kill-switch-text p { margin: 6px 0 0; font-size: 14px; max-width: 640px; }
 .kill-switch-form { flex-shrink: 0; }
-.kill-switch-form button { min-width: 150px; }
+/* Крупный тумблер главного рубильника. */
+.kill-switch-form .switch { width: 58px; height: 32px; }
+.kill-switch-form .switch::after { width: 26px; height: 26px; }
+.kill-switch-form .switch-input:checked + .switch { background: var(--ok); }
+.kill-switch-form .switch-input:checked + .switch::after { transform: translateX(26px); }
 .section-h { margin: 8px 0 16px; font-size: 15px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 .settings-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); transition: box-shadow .15s ease; }

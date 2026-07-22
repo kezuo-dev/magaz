@@ -35,11 +35,12 @@
       {% endif %}
     </p>
   </div>
-  <form method="post" action="/settings/auto-withdraw" class="kill-switch-form">
-    <input type="hidden" name="enabled" value="{{ 'off' if auto_withdraw else 'on' }}">
-    <button type="submit" class="{{ 'danger' if auto_withdraw else '' }}">
-      {{ 'Выключить' if auto_withdraw else 'Включить снятие' }}
-    </button>
+  <form method="post" action="/settings/auto-withdraw" class="kill-switch-form" id="kill-switch-form">
+    <label class="switch-row">
+      <input type="checkbox" name="enabled" value="on" class="switch-input"
+             {{ 'checked' if auto_withdraw else '' }} onchange="document.getElementById('kill-switch-form').submit()">
+      <span class="switch"></span>
+    </label>
   </form>
 </div>
 
