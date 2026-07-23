@@ -103,11 +103,18 @@
 <div class="list-foot muted"><span id="list-count">Показано {{ books|length }} из {{ total }} книг</span></div>
 
 {% if pages > 1 %}
-<div class="pager" id="pager">
-  {% if page > 1 %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&page={{ page-1 }}">← Назад</a>{% endif %}
-  <span>Стр. {{ page }} из {{ pages }}</span>
-  {% if page < pages %}<a class="btn muted" href="/?q={{ q }}&status={{ status }}&page={{ page+1 }}">Вперёд →</a>{% endif %}
-</div>
+{% set base = '/?q=' ~ q ~ '&status=' ~ status ~ '&page=' %}
+<nav class="pager" id="pager" aria-label="Навигация по страницам">
+  <a class="page-btn nav {{ 'disabled' if page <= 1 }}" href="{{ base ~ (page-1) if page > 1 else '#' }}" aria-label="Предыдущая">‹</a>
+  {% for p in page_numbers %}
+    {% if p == 0 %}
+      <span class="page-gap">…</span>
+    {% else %}
+      <a class="page-btn {{ 'current' if p == page }}" href="{{ base ~ p }}">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+  <a class="page-btn nav {{ 'disabled' if page >= pages }}" href="{{ base ~ (page+1) if page < pages else '#' }}" aria-label="Следующая">›</a>
+</nav>
 {% endif %}
 
 <!-- Модалка очистки каталога -->

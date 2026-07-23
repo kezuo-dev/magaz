@@ -110,11 +110,16 @@ class WBClient(MarketplaceClient):
         )
 
     def withdraw(self, listing) -> None:
-        """Снять лот с продажи — обнуляем остаток на складе FBS."""
-        sku = listing.external_id
-        if not sku:
-            raise MarketplaceError("У лота Wildberries нет vendorCode — нечего снимать")
-        self._set_stock(sku, 0)
+        """Снять лот с продажи — обнуляем остаток на складе FBS.
+
+        ВАЖНО: остаток WB привязан к БАРКОДУ (skus[0]), а не к vendorCode. Баркод
+        мы храним в listing.stock_key. Если по ошибке отправить vendorCode, WB не
+        найдёт запись на складе и остаток не обнулится — книга останется висеть.
+        """
+        barcode = getattr(listing, "stock_key", None) or listing.external_id
+        if not barcode:
+            raise MarketplaceError("У лота Wildberries нет баркода — нечего снимать")
+        self._set_stock(barcode, 0)
 
     def _set_stock(self, sku: str, stock: int) -> None:
         # Без склада FBS остатки WB не принимает — тихо пропускаем.
@@ -200,12 +205,21 @@ class WBClient(MarketplaceClient):
             }
 
         # Одним махом узнаём остатки FBS по всем баркодам и проставляем stock.
-        # Нет склада/баркода → остаток неизвестен, оставляем None (импорт решит).
+        # in_sale = «карточка реально продаётся». Если склад FBS задан — это есть
+        # баркод И положительный остаток (мёртвые карточки с остатком 0/без баркода
+        # отсеются при заведении новых книг). Если склада нет, остатки узнать неоткуда
+        # — тогда не блокируем: считаем продающейся любую карточку с баркодом.
         barcodes = [r["_barcode"] for r in rows if r.get("_barcode")]
         stocks = self.fetch_stocks(barcodes)
+        have_stock_data = bool(self.warehouse_id)
         for r in rows:
             bc = r.pop("_barcode", None)
-            r["stock"] = stocks.get(bc) if bc else None
+            amount = stocks.get(bc) if bc else None
+            r["stock"] = amount
+            if have_stock_data:
+                r["in_sale"] = bool(bc) and amount is not None and amount > 0
+            else:
+                r["in_sale"] = bool(bc)
         return rows
 
     def fetch_orders(self) -> list[OrderInfo]:

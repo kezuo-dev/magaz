@@ -74,13 +74,15 @@ def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing)
     """Единый путь снятия книги, пропавшей/проданной на площадке `marketplace`.
 
     Помечаем лот этой площадки снятым (остатка там уже нет — живой вызов не нужен)
-    и кросс-снимаем с остальных площадок.
+    и кросс-снимаем с остальных площадок. Статус книги делаем производным от лотов:
+    книга «снята», только если НЕ осталось активных лотов. Это убирает «раскол»
+    (снята на Ozon, но висит на WB) — пока WB-лот активен, книга остаётся в наличии.
     """
     listing.status = ListingStatus.WITHDRAWN
     listing.last_synced_at = utcnow()
     withdraw_book_everywhere(db, book, except_marketplace=marketplace)
-    if book.status == BookStatus.IN_STOCK:
-        book.status = BookStatus.WITHDRAWN
+    still_active = any(l.status == ListingStatus.ACTIVE for l in book.listings)
+    book.status = BookStatus.IN_STOCK if still_active else BookStatus.WITHDRAWN
 
 
 def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping: dict) -> dict:
@@ -123,11 +125,18 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
         raw_key = row.get("stock_key")
         stock_key = str(raw_key).strip() if raw_key not in (None, "") else None
 
-        # Карточку с нулевым остатком, которой у нас ещё нет, НЕ заводим: на
-        # площадках висят сотни давно снятых карточек (остаток 0, но карточка
-        # существует) — им не место в каталоге. При этом уже известную книгу,
-        # ушедшую в 0, обрабатываем ниже как реальное снятие/продажу.
-        if book is None and out_of_stock:
+        # «Реально продаётся» — авторитетный признак от клиента площадки (Ozon: список
+        # IN_SALE; WB: есть баркод и положительный остаток FBS). Если клиент его не дал
+        # (импорт файлом), считаем продающейся любую строку не с нулевым остатком.
+        in_sale = row.get("in_sale")
+        if in_sale is None:
+            in_sale = not out_of_stock
+
+        # Новую карточку заводим ТОЛЬКО если она реально продаётся. На площадках висят
+        # сотни давно снятых карточек (остаток 0 или вообще без баркода) — им не место
+        # в каталоге. Уже известную книгу, ушедшую из продажи, обрабатываем ниже как
+        # реальное снятие/продажу (кросс-снятие).
+        if book is None and not in_sale:
             skipped += 1
             continue
 
@@ -178,8 +187,9 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             if stock_key:
                 listing.stock_key = stock_key
 
-        if out_of_stock:
-            # Нет в наличии на площадке → снимаем и с других (кросс-снятие).
+        if not in_sale:
+            # Больше не продаётся на площадке (остаток 0 / пропал баркод) → снимаем
+            # лот и кросс-снимаем с других площадок.
             _cross_withdraw(db, book, marketplace, listing)
         else:
             listing.status = ListingStatus.ACTIVE

@@ -74,6 +74,26 @@ def _catalog_stats(db: Session) -> dict:
     return {"total": total, "in_stock": in_stock, "gone": gone, "on_ozon": on_ozon, "on_wb": on_wb}
 
 
+def _page_numbers(page: int, pages: int) -> list[int]:
+    """Номера страниц для навигатора с многоточиями (0 = разрыв «…»).
+
+    Всегда показываем первую и последнюю, окно ±1 вокруг текущей и «…» на разрывах.
+    Пример для стр. 7 из 20: [1, 0, 6, 7, 8, 0, 20].
+    """
+    if pages <= 7:
+        return list(range(1, pages + 1))
+    nums = {1, pages, page, page - 1, page + 1}
+    nums = sorted(n for n in nums if 1 <= n <= pages)
+    out: list[int] = []
+    prev = 0
+    for n in nums:
+        if prev and n - prev > 1:
+            out.append(0)  # разрыв «…»
+        out.append(n)
+        prev = n
+    return out
+
+
 @router.get("/", response_class=HTMLResponse)
 def index(
     request: Request,
@@ -108,6 +128,7 @@ def index(
             "marketplace": marketplace,
             "page": page,
             "pages": pages,
+            "page_numbers": _page_numbers(page, pages),
             "total": total,
             "statuses": list(BookStatus),
             "marketplaces": list(Marketplace),

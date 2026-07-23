@@ -167,6 +167,9 @@ class OzonClient(MarketplaceClient):
                             "external_id": offer_id,
                             # Остаток Ozon читается по offer_id — он же ключ остатка.
                             "stock_key": offer_id,
+                            # Список отфильтрован visibility=IN_SALE — значит карточка
+                            # реально в продаже. Мёртвых карточек тут не будет.
+                            "in_sale": True,
                             "title": prod.get("name"),
                             "isbn": barcode,
                             "price": str(price) if price not in (None, "") else None,

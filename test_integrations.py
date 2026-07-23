@@ -91,6 +91,10 @@ def fake_post(url, json=None, data=None, headers=None, timeout=None):
     raise AssertionError(f"неожиданный POST: {url}")
 
 
+# Сюда пишем, что WB отправил на запись остатка (PUT) — для проверки снятия.
+_wb_stock_writes = []
+
+
 def fake_request(method, url, json=None, data=None, params=None, headers=None, timeout=None):
     if url.endswith("/content/v2/get/cards/list"):
         return FakeResponse(200, {"cards": _fake_wb_cards, "cursor": {"total": len(_fake_wb_cards)}})
@@ -99,7 +103,11 @@ def fake_request(method, url, json=None, data=None, params=None, headers=None, t
             wanted = set((json or {}).get("skus") or [])
             stocks = [s for s in _fake_wb_stocks if s.get("sku") in wanted]
             return FakeResponse(200, {"stocks": stocks})
-        return FakeResponse(200, {})  # PUT — запись остатка (снятие)
+        # PUT — запись остатка (снятие). Запоминаем sku, чтобы проверить, что WB
+        # снимает по баркоду (stock_key), а не по vendorCode.
+        for st in (json or {}).get("stocks") or []:
+            _wb_stock_writes.append((st.get("sku"), st.get("amount")))
+        return FakeResponse(200, {})
     if url.endswith("/api/v3/orders/new"):
         return FakeResponse(200, _fake_wb_orders)
     raise AssertionError(f"неожиданный запрос: {method} {url}")
@@ -483,12 +491,15 @@ _fake_wb_stocks = []
 print("[ok] кнопка «Обновить каталог» сверяет все площадки и снимает пропавшее")
 
 
-# --- 10b. Новые карточки с нулевым остатком не загружаются ------------------
-# На WB висят сотни давно снятых карточек (остаток 0, но карточка есть) — их не
-# заводим. Новую с остатком заводим, новую с нулём — пропускаем.
+# --- 10b. Новые карточки не в продаже не загружаются -----------------------
+# На WB висят сотни давно снятых карточек — их не заводим. Три случая:
+#  - живая (баркод + остаток) → создаётся;
+#  - снятая (остаток 0) → пропускается;
+#  - мёртвая вообще без баркода → пропускается (остаток узнать нельзя).
 _fake_wb_cards = [
     {"vendorCode": "WB-LIVE-2", "title": "Живая новая", "brand": "И", "sizes": [{"price": 100, "skus": ["live2"]}]},
     {"vendorCode": "WB-ZERO-1", "title": "Снятая карточка", "brand": "И", "sizes": [{"price": 100, "skus": ["zero1"]}]},
+    {"vendorCode": "WB-NOBC-1", "title": "Без баркода", "brand": "И", "sizes": [{"price": 100, "skus": []}]},
 ]
 _fake_wb_stocks = [{"sku": "live2", "amount": 4}, {"sku": "zero1", "amount": 0}]  # zero1 явно 0
 with SessionLocal() as s:
@@ -497,9 +508,38 @@ with SessionLocal() as s:
 with SessionLocal() as s:
     assert s.query(Book).filter_by(sku="WB-LIVE-2").count() == 1, "новая книга с остатком не создана"
     assert s.query(Book).filter_by(sku="WB-ZERO-1").count() == 0, "новая карточка с нулём не должна попадать в каталог"
+    assert s.query(Book).filter_by(sku="WB-NOBC-1").count() == 0, "карточка без баркода не должна попадать в каталог"
 _fake_wb_cards = []
 _fake_wb_stocks = []
-print("[ok] сверка: новые карточки с нулевым остатком не загружаются")
+print("[ok] сверка: новые карточки не в продаже (0 / без баркода) не загружаются")
+
+
+# --- 10c. WB снимает по баркоду (stock_key), а не по vendorCode -------------
+# Книга на Ozon+WB; баркод WB отличается от vendorCode. При кросс-снятии WB должен
+# обнулить остаток по баркоду — иначе книга «зависнет» на WB.
+_wb_stock_writes.clear()
+set_auto_withdraw(True)
+with SessionLocal() as s:
+    b = Book(sku="XW-1", title="Кросс WB", status=BookStatus.IN_STOCK, price=100)
+    s.add(b); s.flush()
+    s.add(Listing(book_id=b.id, marketplace="ozon", external_id="XW-1", stock_key="XW-1", status=ListingStatus.ACTIVE))
+    # На WB vendorCode = XW-1, но баркод (stock_key) = BC-XW-1.
+    s.add(Listing(book_id=b.id, marketplace="wildberries", external_id="XW-1", stock_key="BC-XW-1", status=ListingStatus.ACTIVE))
+    s.commit()
+    xw_id = b.id
+# Продажа на Ozon → кросс-снятие с WB.
+_fake_orders["postings"] = [{"posting_number": "XW-ORDER", "products": [{"offer_id": "XW-1"}]}]
+with SessionLocal() as s:
+    poll_marketplace_orders(s, "ozon"); s.commit()
+_fake_orders["postings"] = []
+# WB получил обнуление именно по баркоду BC-XW-1, а не по vendorCode XW-1.
+assert ("BC-XW-1", 0) in _wb_stock_writes, f"WB снят не по баркоду: {_wb_stock_writes}"
+assert ("XW-1", 0) not in _wb_stock_writes, "WB ошибочно снят по vendorCode"
+with SessionLocal() as s:
+    wb_l = s.query(Listing).filter_by(book_id=xw_id, marketplace="wildberries").one()
+    assert wb_l.status == ListingStatus.WITHDRAWN, "лот WB не снят"
+    assert s.get(Book, xw_id).status == BookStatus.SOLD, "книга не помечена проданной"
+print("[ok] WB снимается по баркоду (stock_key), книга не зависает")
 
 
 # --- 11. Импорт файлом (CSV) не снимает отсутствующие ----------------------
