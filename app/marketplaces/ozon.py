@@ -133,18 +133,37 @@ class OzonClient(MarketplaceClient):
                 "Не задан ID склада FBS для Ozon. Укажите его в настройках "
                 "площадки (ЛК Ozon → Логистика → Мои склады)."
             )
-        self._post(
+        try:
+            warehouse = int(self.warehouse_id)
+        except (TypeError, ValueError):
+            raise MarketplaceError(
+                f"ID склада Ozon должен быть числом, а задано «{self.warehouse_id}»"
+            ) from None
+
+        data = self._post(
             "/v2/products/stocks",
             {
                 "stocks": [
                     {
                         "offer_id": offer_id,
                         "stock": stock,
-                        "warehouse_id": int(self.warehouse_id),
+                        "warehouse_id": warehouse,
                     }
                 ]
             },
         )
+
+        # Ozon отвечает 200 даже когда остаток НЕ обновлён: в result лежит
+        # updated=false и причина в errors. Без этой проверки снятие считалось бы
+        # успешным, книга осталась бы в продаже, а в журнал ушло бы «Снято».
+        for item in data.get("result") or []:
+            if item.get("updated"):
+                continue
+            errors = item.get("errors") or []
+            reason = "; ".join(
+                str(e.get("message") or e.get("code") or e) for e in errors
+            ) or "Ozon не обновил остаток (причина не указана)"
+            raise MarketplaceError(f"Ozon не обновил остаток по {offer_id}: {reason}")
 
     def fetch_catalog(self) -> list[dict]:
         """Выгрузить все товары Ozon постранично (по last_id).
@@ -233,12 +252,16 @@ class OzonClient(MarketplaceClient):
                 offer_id = it.get("offer_id")
                 if not offer_id:
                     continue
-                # Складов может быть несколько (fbo/fbs) — суммируем и вычитаем резерв.
-                present = 0
-                reserved = 0
-                for st in it.get("stocks") or []:
-                    present += int(st.get("present") or 0)
-                    reserved += int(st.get("reserved") or 0)
+                # Остатки приходят по типам схемы (fbs — наш склад, fbo — склад Ozon).
+                # Считаем ТОЛЬКО fbs, если он есть: книгами мы торгуем со своего
+                # склада, и именно его остаток обнуляем при снятии. Если сложить с
+                # fbo, проданная книга не показала бы 0 и не снялась бы с другой
+                # площадки. Когда типов нет вовсе — суммируем что дали.
+                entries = it.get("stocks") or []
+                fbs_entries = [st for st in entries if str(st.get("type") or "").lower() == "fbs"]
+                counted = fbs_entries or entries
+                present = sum(int(st.get("present") or 0) for st in counted)
+                reserved = sum(int(st.get("reserved") or 0) for st in counted)
                 result[str(offer_id)] = max(0, present - reserved)
         return result
 

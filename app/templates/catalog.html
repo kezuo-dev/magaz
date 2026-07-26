@@ -103,7 +103,10 @@
 <div class="list-foot muted"><span id="list-count">Показано {{ books|length }} из {{ total }} книг</span></div>
 
 {% if pages > 1 %}
-{% set base = '/?q=' ~ q ~ '&status=' ~ status ~ '&page=' %}
+{# urlencode обязателен: без него поиск с кириллицей, «&», «#» или пробелом
+   ломает ссылки пагинации. marketplace тоже переносим, иначе фильтр по площадке
+   терялся при переходе на другую страницу. #}
+{% set base = '/?q=' ~ q|urlencode ~ '&status=' ~ status|urlencode ~ '&marketplace=' ~ marketplace|urlencode ~ '&page=' %}
 <nav class="pager" id="pager" aria-label="Навигация по страницам">
   <a class="page-btn nav {{ 'disabled' if page <= 1 }}" href="{{ base ~ (page-1) if page > 1 else '#' }}" aria-label="Предыдущая">‹</a>
   {% for p in page_numbers %}

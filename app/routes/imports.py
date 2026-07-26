@@ -191,6 +191,8 @@ def import_sync(request: Request, db: Session = Depends(get_db)):
     results = sync_all(db)
     if not results:
         return RedirectResponse("/?synced=" + quote("нет включённых площадок"), status_code=303)
+    if "__busy__" in results:
+        return RedirectResponse("/?synced=" + quote("Сверка уже выполняется"), status_code=303)
 
     parts = []
     for mp, res in results.items():

@@ -239,9 +239,31 @@ with SessionLocal() as s:
     assert b.status == BookStatus.SOLD, "книга не помечена проданной"
     wb_l = s.query(Listing).filter_by(book_id=bid, marketplace="wildberries").one()
     assert wb_l.status == ListingStatus.WITHDRAWN, "лот на WB не снят (кросс-снятие)"
-    order = s.query(Order).filter_by(external_order_id="ORDER-777").one()
+    # Ключ заказа = номер#артикул (в одном отправлении может быть неск. книг).
+    order = s.query(Order).filter_by(external_order_id="ORDER-777#SOLD-1").one()
     assert order.processed and order.book_id == bid
 print("[ok] продажа на Ozon снимает книгу с WB, заказ обработан")
+
+# Отправление с ДВУМЯ книгами: каждая обрабатывается отдельно, не отсекается
+# как «дубль заказа». Раньше второй товар молча пропускался — риск двойной продажи.
+make_book("MULTI-1", "Первая книга", marketplaces=("ozon", "wildberries"))
+make_book("MULTI-2", "Вторая книга", marketplaces=("ozon", "wildberries"))
+_fake_orders["postings"] = [{
+    "posting_number": "ORDER-999",
+    "products": [{"offer_id": "MULTI-1"}, {"offer_id": "MULTI-2"}]
+}]
+with SessionLocal() as s:
+    assert poll_marketplace_orders(s, "ozon") == 2, "две книги должны были обработаться"
+    s.commit()
+with SessionLocal() as s:
+    o1 = s.query(Order).filter_by(external_order_id="ORDER-999#MULTI-1").one()
+    o2 = s.query(Order).filter_by(external_order_id="ORDER-999#MULTI-2").one()
+    assert o1.processed and o2.processed, "обе записи заказа обработаны"
+    b1 = s.query(Book).filter_by(sku="MULTI-1").one()
+    b2 = s.query(Book).filter_by(sku="MULTI-2").one()
+    assert b1.status == BookStatus.SOLD and b2.status == BookStatus.SOLD
+_fake_orders["postings"] = []
+print("[ok] отправление с несколькими книгами: все обрабатываются")
 
 # Повторный опрос того же заказа не создаёт дубль.
 _fake_orders["postings"] = [{"posting_number": "ORDER-777", "products": [{"offer_id": "SOLD-1"}]}]

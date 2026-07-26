@@ -144,10 +144,19 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
 
     new_count = 0
     for info in orders:
+        # В одном отправлении может быть НЕСКОЛЬКО книг — площадка отдаёт их
+        # отдельными строками с ОДИНАКОВЫМ номером заказа. Если дедуплицировать
+        # только по номеру, вторая и последующие книги молча отбрасывались бы и
+        # не снимались с других площадок (прямой риск двойной продажи). Поэтому
+        # ключ заказа = номер + артикул: одна строка на каждую проданную книгу.
+        order_key = info.external_order_id
+        if info.external_sku:
+            order_key = f"{info.external_order_id}#{info.external_sku}"
+
         exists = db.scalar(
             select(Order).where(
                 Order.marketplace == marketplace,
-                Order.external_order_id == info.external_order_id,
+                Order.external_order_id == order_key,
             )
         )
         if exists:
@@ -160,7 +169,7 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
 
         order = Order(
             marketplace=marketplace,
-            external_order_id=info.external_order_id,
+            external_order_id=order_key,
             external_sku=info.external_sku,
             book_id=book.id if book else None,
             processed=False,

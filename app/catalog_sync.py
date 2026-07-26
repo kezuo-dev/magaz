@@ -25,6 +25,8 @@ marketplace.
 """
 from __future__ import annotations
 
+import threading
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -54,6 +56,12 @@ TARGET_FIELDS = {
     "description": "Описание",
     "external_id": "ID лота на площадке",
 }
+
+
+# Полная сверка тяжёлая и пишет в те же таблицы, что и фоновые задачи. Замок не
+# даёт запустить второй проход одновременно (кнопка в UI + задача планировщика).
+# Прод работает в один процесс (uvicorn --workers 1), поэтому его достаточно.
+_SYNC_LOCK = threading.Lock()
 
 
 def _log(db: Session, *, marketplace, action, ok, message) -> None:
@@ -295,7 +303,19 @@ def sync_all(db: Session) -> dict:
     """Сверить все включённые площадки. Сбой одной не останавливает остальные.
 
     Возвращает {marketplace: результат|ошибка} по каждой включённой площадке.
+    Если сверка уже идёт (фоновая задача или другая кнопка) — не запускаем вторую:
+    два параллельных прохода по одним SKU дают конфликт на уникальном лоте
+    (book_id+marketplace) и рассинхрон статусов.
     """
+    if not _SYNC_LOCK.acquire(blocking=False):
+        return {"__busy__": {"error": "Сверка уже выполняется — дождитесь завершения"}}
+    try:
+        return _sync_all_locked(db)
+    finally:
+        _SYNC_LOCK.release()
+
+
+def _sync_all_locked(db: Session) -> dict:
     enabled = db.scalars(
         select(MarketplaceAccount.marketplace).where(MarketplaceAccount.enabled == True)  # noqa: E712
     ).all()

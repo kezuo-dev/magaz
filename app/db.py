@@ -34,9 +34,9 @@ def ensure_schema() -> None:
     правки базы. На проде эту роль играет alembic.
     """
     inspector = inspect(engine)
-    if "books" not in inspector.get_table_names():
-        return  # таблицу создаст create_all со всеми колонками сразу
-    existing = {col["name"] for col in inspector.get_columns("books")}
+    tables = set(inspector.get_table_names())
+
+    existing = {col["name"] for col in inspector.get_columns("books")} if "books" in tables else set()
     additions = {
         "ozon_category_id": "ALTER TABLE books ADD COLUMN ozon_category_id VARCHAR(32)",
         "ozon_type_id": "ALTER TABLE books ADD COLUMN ozon_type_id VARCHAR(32)",
@@ -50,13 +50,16 @@ def ensure_schema() -> None:
         # Остаток по умолчанию 1 — у уже заведённых книг он проставится этим же.
         "quantity": "ALTER TABLE books ADD COLUMN quantity INTEGER DEFAULT 1",
     }
-    with engine.begin() as conn:
-        for column, ddl in additions.items():
-            if column not in existing:
-                conn.execute(text(ddl))
+    if existing:
+        with engine.begin() as conn:
+            for column, ddl in additions.items():
+                if column not in existing:
+                    conn.execute(text(ddl))
 
     # Колонки таблицы listings, появившиеся позже (слежение за остатками).
-    if "listings" in inspector.get_table_names():
+    # Проверяем независимо от books: раньше ранний return при отсутствии books
+    # пропускал эту миграцию целиком.
+    if "listings" in tables:
         listing_cols = {col["name"] for col in inspector.get_columns("listings")}
         listing_additions = {
             "stock_key": "ALTER TABLE listings ADD COLUMN stock_key VARCHAR(128)",
@@ -65,3 +68,12 @@ def ensure_schema() -> None:
             for column, ddl in listing_additions.items():
                 if column not in listing_cols:
                     conn.execute(text(ddl))
+
+    # Индексы, добавленные после создания таблиц: create_all() их не досоздаёт.
+    # Каталог сортируется по books.updated_at DESC — без индекса на 50k книгах
+    # каждая страница вызывает полную сортировку таблицы.
+    if "books" in tables:
+        index_names = {ix["name"] for ix in inspector.get_indexes("books")}
+        if "ix_books_updated_at" not in index_names:
+            with engine.begin() as conn:
+                conn.execute(text("CREATE INDEX ix_books_updated_at ON books (updated_at)"))

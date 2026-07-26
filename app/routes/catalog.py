@@ -35,12 +35,15 @@ def _filtered_books_query(q: str, status: str, marketplace: str):
     """Собрать запрос списка книг по поиску/фильтрам (общий для страницы и API)."""
     stmt = select(Book).options(selectinload(Book.listings))
     if q:
-        like = f"%{q.strip()}%"
+        # Экранируем подстановочные символы LIKE: без этого поиск «50%» или «A_B»
+        # трактовал бы % и _ как шаблон и находил бы лишнее.
+        needle = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{needle}%"
         stmt = stmt.where(
             or_(
-                Book.title.ilike(like),
-                Book.sku.ilike(like),
-                Book.isbn.ilike(like),
+                Book.title.ilike(like, escape="\\"),
+                Book.sku.ilike(like, escape="\\"),
+                Book.isbn.ilike(like, escape="\\"),
             )
         )
     if status:

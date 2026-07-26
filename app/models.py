@@ -81,8 +81,10 @@ class Book(Base):
     height_mm: Mapped[int | None] = mapped_column(Integer, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # index: каталог сортируется по updated_at DESC на каждой странице. Без индекса
+    # на 50k книгах это полная сортировка таблицы при каждом открытии списка.
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, index=True
     )
 
     listings: Mapped[list["Listing"]] = relationship(

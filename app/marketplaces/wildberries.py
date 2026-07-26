@@ -143,12 +143,22 @@ class WBClient(MarketplaceClient):
         """Остатки FBS по баркодам (ключам остатка). Возвращает {баркод: остаток}.
 
         Тот же метод складов WB, но POST-запросом. WB принимает до 1000 sku за раз,
-        поэтому шлём батчами. Если склад не задан — остатки узнать неоткуда, {}.
-        Дешёвая проверка «книга ещё в наличии?» без выгрузки всех карточек.
+        поэтому шлём батчами. Дешёвая проверка «книга ещё в наличии?» без выгрузки
+        всех карточек.
+
+        Если склад не задан — бросаем ошибку, а НЕ возвращаем пустой словарь:
+        по контракту отсутствие ключа в ответе означает «карточка пропала», и
+        пустой ответ на ненастроенном складе привёл бы к массовому ложному снятию
+        всего каталога. Лучше честно прервать слежение с понятной причиной.
         """
         result: dict[str, int] = {}
-        if not self.warehouse_id or not keys:
+        if not keys:
             return result
+        if not self.warehouse_id:
+            raise MarketplaceError(
+                "Не задан склад FBS Wildberries (warehouse_id) — остатки не прочитать. "
+                "Укажите ID склада в настройках площадки."
+            )
         for i in range(0, len(keys), 1000):
             batch = keys[i:i + 1000]
             data = self._request(
@@ -225,8 +235,11 @@ class WBClient(MarketplaceClient):
         # отсеются при заведении новых книг). Если склада нет, остатки узнать неоткуда
         # — тогда не блокируем: считаем продающейся любую карточку с баркодом.
         barcodes = [r["_barcode"] for r in rows if r.get("_barcode")]
-        stocks = self.fetch_stocks(barcodes)
         have_stock_data = bool(self.warehouse_id)
+        # Без склада fetch_stocks намеренно бросает ошибку (защита слежения от
+        # ложных снятий). Но полной сверке каталога остатки не обязательны —
+        # она и без них заведёт книги, поэтому здесь деградируем мягко.
+        stocks = self.fetch_stocks(barcodes) if have_stock_data else {}
         for r in rows:
             bc = r.pop("_barcode", None)
             amount = stocks.get(bc) if bc else None
