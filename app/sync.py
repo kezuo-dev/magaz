@@ -93,13 +93,18 @@ def withdraw_book(db: Session, book: Book, marketplace: str) -> bool:
         return False
 
 
-def withdraw_book_everywhere(db: Session, book: Book, *, except_marketplace: str | None = None) -> None:
+def withdraw_book_everywhere(db: Session, book: Book, *, except_marketplace: str | None = None) -> bool:
     """Снять книгу со всех площадок, кроме указанной (обычно — той, где продалась).
 
     Единая точка авто-снятия для всех механизмов (заказы, сверка, слежение).
     Если рубильник «Автоснятие» в Настройках выключен — ничего не делаем: лоты на
     других площадках остаются активными (книга там реально продолжает продаваться),
     а в журнал пишется пропуск, чтобы было видно, что автоматика заметила продажу.
+
+    Возвращает True, если снятие фактически завершено (сняли все цели ИЛИ снимать
+    было нечего). False — если были активные лоты, но снятие пропущено из-за
+    выключенного рубильника: вызывающий не должен считать продажу до конца
+    обработанной, чтобы позже (при включённом рубильнике) её можно было отзеркалить.
     """
     from app.flags import is_auto_withdraw_enabled  # локальный импорт против цикла
 
@@ -109,15 +114,16 @@ def withdraw_book_everywhere(db: Session, book: Book, *, except_marketplace: str
         and l.status not in (ListingStatus.WITHDRAWN,)
     ]
     if not targets:
-        return
+        return True
 
     if not is_auto_withdraw_enabled(db):
         _log(db, marketplace=None, action="withdraw_skipped", ok=True, book_id=book.id,
              message=f"Книга {book.sku}: автоснятие выключено — лоты на других площадках не тронуты")
-        return
+        return False
 
     for listing in targets:
         withdraw_book(db, book, listing.marketplace)
+    return True
 
 
 def poll_marketplace_orders(db: Session, marketplace: str) -> int:
@@ -163,14 +169,19 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
         new_count += 1
 
         if book:
-            book.status = BookStatus.SOLD
-            # Помечаем лот на этой площадке проданным и снимаем с остальных.
+            # Лот на площадке продажи снят в любом случае — он реально продан.
             sold_listing = next((l for l in book.listings if l.marketplace == marketplace), None)
             if sold_listing:
                 sold_listing.status = ListingStatus.WITHDRAWN
                 sold_listing.last_synced_at = utcnow()
-            withdraw_book_everywhere(db, book, except_marketplace=marketplace)
-            order.processed = True
+            # Кросс-снятие с других площадок. Если рубильник выключен, снятие не
+            # выполнится — тогда заказ НЕ помечаем processed, чтобы позже (после
+            # включения автоснятия) продажу можно было отзеркалить.
+            done = withdraw_book_everywhere(db, book, except_marketplace=marketplace)
+            # Статус книги производный от лотов: SOLD, только если активных не осталось.
+            still_active = any(l.status == ListingStatus.ACTIVE for l in book.listings)
+            book.status = BookStatus.IN_STOCK if still_active else BookStatus.SOLD
+            order.processed = done
             _log(db, marketplace=marketplace, action="order_sold", ok=True, book_id=book.id,
                  message=f"Заказ {info.external_order_id}: книга {book.sku} продана на {marketplace}")
         else:

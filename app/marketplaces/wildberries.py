@@ -116,15 +116,23 @@ class WBClient(MarketplaceClient):
         мы храним в listing.stock_key. Если по ошибке отправить vendorCode, WB не
         найдёт запись на складе и остаток не обнулится — книга останется висеть.
         """
-        barcode = getattr(listing, "stock_key", None) or listing.external_id
+        # Только stock_key (баркод). НЕ откатываемся на external_id: там vendorCode,
+        # и WB молча не найдёт по нему запись — книга осталась бы висеть в продаже.
+        barcode = getattr(listing, "stock_key", None)
         if not barcode:
-            raise MarketplaceError("У лота Wildberries нет баркода — нечего снимать")
+            raise MarketplaceError(
+                "У лота Wildberries нет баркода (stock_key) — снять остаток нельзя. "
+                "Нужна сверка каталога, чтобы подтянуть баркод."
+            )
         self._set_stock(barcode, 0)
 
     def _set_stock(self, sku: str, stock: int) -> None:
-        # Без склада FBS остатки WB не принимает — тихо пропускаем.
+        # Без склада FBS остатки WB не принимает. Это не штатная ситуация при
+        # снятии — сообщаем явно, иначе снятие «прошло бы» вникуда.
         if not self.warehouse_id:
-            return
+            raise MarketplaceError(
+                "Не задан склад FBS Wildberries (warehouse_id) — остаток не изменить"
+            )
         self._request(
             "PUT",
             f"{MARKETPLACE_URL}/api/v3/stocks/{self.warehouse_id}",
@@ -198,10 +206,17 @@ class WBClient(MarketplaceClient):
             total = resp_cursor.get("total", len(cards))
             if total < cursor["limit"] or not cards:
                 break
+            next_updated = resp_cursor.get("updatedAt")
+            next_nm = resp_cursor.get("nmID")
+            # Защита от зацикливания: если WB на полной странице не отдал курсор
+            # (updatedAt/nmID пусты), сдвинуться некуда — тот же запрос вернул бы ту
+            # же страницу. Прекращаем, а не крутим бесконечно один и тот же батч.
+            if next_updated is None or next_nm is None:
+                break
             cursor = {
                 "limit": cursor["limit"],
-                "updatedAt": resp_cursor.get("updatedAt"),
-                "nmID": resp_cursor.get("nmID"),
+                "updatedAt": next_updated,
+                "nmID": next_nm,
             }
 
         # Одним махом узнаём остатки FBS по всем баркодам и проставляем stock.

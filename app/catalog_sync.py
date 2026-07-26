@@ -110,11 +110,16 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             skipped += 1
             continue
 
-        # Ищем существующую книгу по SKU, затем по ISBN — чтобы не плодить дубли.
+        # Ищем существующую книгу СТРОГО по SKU. SKU — уникальный идентификатор
+        # экземпляра. Книги букинистические, б/у: у разных физических экземпляров
+        # ISBN совпадает, поэтому искать по ISBN НЕЛЬЗЯ — иначе новый экземпляр
+        # «приклеится» к чужому и не заведётся отдельной карточкой (пропадёт).
+        # По ISBN ищем только когда SKU в строке вообще нет (площадка не дала) —
+        # тогда это единственная зацепка, чтобы не плодить дубли одной карточки.
         book = None
         if sku:
             book = db.scalar(select(Book).where(Book.sku == sku))
-        if not book and isbn:
+        elif isbn:
             book = db.scalar(select(Book).where(Book.isbn == isbn))
 
         stock = _parse_stock(row.get("stock"))
@@ -137,6 +142,13 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
         # в каталоге. Уже известную книгу, ушедшую из продажи, обрабатываем ниже как
         # реальное снятие/продажу (кросс-снятие).
         if book is None and not in_sale:
+            skipped += 1
+            continue
+
+        # Новой книге нужно название (Book.title NOT NULL). Строку с SKU, но без
+        # названия пропускаем — иначе db.flush() упал бы с IntegrityError и откатил
+        # всю сверку площадки. Существующей книге название уже задано — не мешаем.
+        if book is None and not title:
             skipped += 1
             continue
 
@@ -360,19 +372,42 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
              message="Пустой ответ по остаткам — слежение пропущено (защита от ложного снятия)")
         return {"checked": len(keys), "removed": 0}
 
+    # Защита от ЧАСТИЧНОГО сбоя: если площадка не вернула значительную долю
+    # запрошенных ключей, это похоже на лимит/обрыв пагинации, а не на то, что
+    # разом продали пол-склада. В этом случае отсутствие ключа НЕ считаем снятием
+    # (снимаем только по явному нулю) — пропавшие карточки доснимет полная сверка,
+    # которая тянет весь каталог целиком. Порог: не вернулась > трети ключей.
+    missing = [k for k in keys if k not in stocks]
+    # Подозрительно, когда пропала БО́ЛЬШАЯ ЧАСТЬ ключей и это не единичные карточки:
+    # разом «удалить» полкаталога площадка не может, а вот отдать неполный ответ —
+    # запросто. Единичные пропажи (1-4 книги) считаем настоящими: это обычное дело.
+    suspicious = len(missing) >= 5 and len(missing) > len(keys) * 0.5
+    trust_missing = not suspicious
+    if suspicious:
+        _log(db, marketplace=marketplace, action="watch_stocks", ok=False,
+             message=(f"Не вернулось {len(missing)} из {len(keys)} остатков — вероятен сбой/лимит. "
+                      f"Снимаем только по явному нулю; пропавшие ключи оставлены полной сверке"))
+
     removed = 0
     for listing in keyed:
         book = listing.book
         if book is None:
             continue
-        # Ключ не вернулся (карточки нет) ИЛИ остаток обнулён — снимаем.
         amount = stocks.get(listing.stock_key)
-        if amount is None or amount <= 0:
-            _cross_withdraw(db, book, marketplace, listing)
-            removed += 1
-            reason = "остаток 0" if amount is not None else "карточка пропала"
-            _log(db, marketplace=marketplace, action="watch_removed", ok=True,
-                 message=f"Книга {book.sku}: {reason} на {marketplace}")
+        if amount is None:
+            # Ключ не вернулся. Снимаем как «карточка пропала» только если ответ
+            # выглядит полным (trust_missing) — иначе это подозрение на сбой.
+            if not trust_missing:
+                continue
+            reason = "карточка пропала"
+        elif amount <= 0:
+            reason = "остаток 0"
+        else:
+            continue
+        _cross_withdraw(db, book, marketplace, listing)
+        removed += 1
+        _log(db, marketplace=marketplace, action="watch_removed", ok=True,
+             message=f"Книга {book.sku}: {reason} на {marketplace}")
 
     if removed:
         _log(db, marketplace=marketplace, action="watch_stocks", ok=True,

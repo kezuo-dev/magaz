@@ -28,6 +28,24 @@ MAX_RETRIES = 4
 RETRY_BACKOFF = 1.5  # секунды: 1.5, 3, 4.5, 6
 
 
+def _first_positive_price(*values) -> float | None:
+    """Первая корректная положительная цена из переданных (Ozon шлёт их строками).
+
+    marketing_price без акции приходит как "0"/0 — такое значение пропускаем и
+    берём следующее (обычную price). Если ничего валидного нет — None.
+    """
+    for v in values:
+        if v is None or v == "":
+            continue
+        try:
+            num = float(v)
+        except (TypeError, ValueError):
+            continue
+        if num > 0:
+            return num
+    return None
+
+
 class OzonClient(MarketplaceClient):
     marketplace = "ozon"
 
@@ -156,7 +174,13 @@ class OzonClient(MarketplaceClient):
                 )
                 for prod in (info.get("result") or {}).get("items") or info.get("items") or []:
                     offer_id = prod.get("offer_id")
-                    price = prod.get("marketing_price") or prod.get("price")
+                    # Ozon отдаёт цены строками ("1990.0000"), а marketing_price
+                    # при отсутствии акции — "0". Голый `or` тогда берёт "0" вместо
+                    # реальной цены, поэтому парсим в число и берём акционную,
+                    # только если она положительная.
+                    price = _first_positive_price(
+                        prod.get("marketing_price"), prod.get("price")
+                    )
                     barcode = prod.get("barcode")
                     if not barcode:
                         barcodes = prod.get("barcodes") or []
@@ -232,29 +256,39 @@ class OzonClient(MarketplaceClient):
         since = now - timedelta(days=3)
         # Формат Ozon — ISO 8601 с Z на конце.
         fmt = "%Y-%m-%dT%H:%M:%S.000Z"
-        data = self._post(
-            "/v3/posting/fbs/list",
-            {
-                "dir": "DESC",
-                "filter": {
-                    "status": "",
-                    "since": since.strftime(fmt),
-                    "to": now.strftime(fmt),
-                },
-                "limit": 100,
-                "offset": 0,
-                "with": {},
-            },
-        )
         result: list[OrderInfo] = []
-        postings = (data.get("result") or {}).get("postings") or []
-        for posting in postings:
-            order_number = posting.get("posting_number") or posting.get("order_number")
-            for product in posting.get("products", []):
-                result.append(
-                    OrderInfo(
-                        external_order_id=str(order_number),
-                        external_sku=str(product.get("offer_id")) if product.get("offer_id") else None,
+        limit = 100
+        offset = 0
+        # Пагинация по offset: за 3-дневное окно отправлений может быть больше 100.
+        # Без цикла часть продаж не попала бы в кросс-снятие. Стоп — когда страница
+        # неполная (постингов меньше лимита) или предохранитель по offset.
+        while offset < 10000:
+            # Пустой filter.status Ozon может отклонить — поле опускаем целиком,
+            # чтобы вернулись отправления во всех статусах.
+            data = self._post(
+                "/v3/posting/fbs/list",
+                {
+                    "dir": "DESC",
+                    "filter": {
+                        "since": since.strftime(fmt),
+                        "to": now.strftime(fmt),
+                    },
+                    "limit": limit,
+                    "offset": offset,
+                    "with": {},
+                },
+            )
+            postings = (data.get("result") or {}).get("postings") or []
+            for posting in postings:
+                order_number = posting.get("posting_number") or posting.get("order_number")
+                for product in posting.get("products", []):
+                    result.append(
+                        OrderInfo(
+                            external_order_id=str(order_number),
+                            external_sku=str(product.get("offer_id")) if product.get("offer_id") else None,
+                        )
                     )
-                )
+            if len(postings) < limit:
+                break
+            offset += limit
         return result

@@ -126,7 +126,12 @@ def make_book(sku, title="Тест", marketplaces=("ozon",)):
         s.add(b)
         s.flush()
         for mp in marketplaces:
-            s.add(Listing(book_id=b.id, marketplace=mp, external_id=sku, status=ListingStatus.ACTIVE))
+            # stock_key как в проде после сверки: Ozon — offer_id (=sku),
+            # WB — баркод (отличается от vendorCode). Без него снятие с WB
+            # не сработало бы (снимаем строго по баркоду).
+            stock_key = sku if mp == "ozon" else f"BC-{sku}"
+            s.add(Listing(book_id=b.id, marketplace=mp, external_id=sku,
+                          stock_key=stock_key, status=ListingStatus.ACTIVE))
         s.commit()
         return b.id
 
@@ -363,10 +368,11 @@ with SessionLocal() as s:
     s.query(Book).delete()
     s.commit()
 
-_fake_ozon_list = {"items": [{"offer_id": "W-1"}, {"offer_id": "W-2"}], "last_id": ""}
+_fake_ozon_list = {"items": [{"offer_id": "W-1"}, {"offer_id": "W-2"}, {"offer_id": "W-3"}], "last_id": ""}
 _fake_ozon_info = {"items": [
     {"offer_id": "W-1", "name": "Следим 1", "price": "100", "barcode": "b1"},
     {"offer_id": "W-2", "name": "Следим 2", "price": "100", "barcode": "b2"},
+    {"offer_id": "W-3", "name": "Следим 3", "price": "100", "barcode": "b3"},
 ]}
 _fake_wb_cards = [{"vendorCode": "W-1", "title": "Следим 1", "brand": "И",
                    "sizes": [{"price": 100, "skus": ["wb-b1"]}]}]
@@ -384,10 +390,11 @@ print("[ok] сверка проставляет ключи остатка (Ozon 
 
 # Слежение Ozon: W-1 куплена — экземпляр зарезервирован под заказ (present=1,
 # reserved=1 → доступно 0). Должна сняться с обеих площадок ДО фактической отгрузки.
-# W-2 свободна (present=3, reserved=0) — живёт.
+# W-2 и W-3 свободны (present=3, reserved=0) — живут.
 _fake_ozon_stocks = {"items": [
     {"offer_id": "W-1", "stocks": [{"present": 1, "reserved": 1}]},
     {"offer_id": "W-2", "stocks": [{"present": 3, "reserved": 0}]},
+    {"offer_id": "W-3", "stocks": [{"present": 3, "reserved": 0}]},
 ]}
 with SessionLocal() as s:
     res = watch_stocks(s, "ozon")
@@ -414,12 +421,13 @@ with SessionLocal() as s:
     assert s.query(Book).filter_by(sku="W-2").one().status == BookStatus.IN_STOCK
 print("[ok] слежение: пустой ответ остатков не снимает книги (защита от сбоя API)")
 
-# W-2 действительно пропала, но другие ключи вернулись → снимаем W-2.
-_fake_ozon_stocks = {"items": [{"offer_id": "W-1", "stocks": [{"present": 0}]}]}
+# W-2 действительно пропала, но большинство ключей вернулось → снимаем W-2.
+# (W-1 уже снята ранее и не опрашивается; активны W-2 и W-3.)
+_fake_ozon_stocks = {"items": [{"offer_id": "W-3", "stocks": [{"present": 3, "reserved": 0}]}]}
 with SessionLocal() as s:
     res = watch_stocks(s, "ozon")
     s.commit()
-    # W-1 уже снята ранее (не активна), W-2 активна и пропала из ответа → снять.
+    # W-3 жива и вернулась, W-2 пропала из ответа → снять только W-2.
     assert res["removed"] == 1, f"ожидали снятие пропавшей W-2, {res}"
 with SessionLocal() as s:
     assert s.query(Book).filter_by(sku="W-2").one().status == BookStatus.WITHDRAWN
@@ -540,6 +548,41 @@ with SessionLocal() as s:
     assert wb_l.status == ListingStatus.WITHDRAWN, "лот WB не снят"
     assert s.get(Book, xw_id).status == BookStatus.SOLD, "книга не помечена проданной"
 print("[ok] WB снимается по баркоду (stock_key), книга не зависает")
+
+
+# --- 10d. Экземпляры с ОДИНАКОВЫМ ISBN — разные книги ----------------------
+# Букинистика: у разных физических экземпляров один и тот же ISBN. Раньше поиск
+# шёл по SKU, а затем по ISBN — второй экземпляр «приклеивался» к первому и в
+# каталог не попадал вообще (баг «ДУБЛЬ-233 вообще нет»).
+with SessionLocal() as s:
+    s.query(Listing).delete(); s.query(Book).delete(); s.commit()
+
+_fake_ozon_list = {"items": [{"offer_id": "DUP-1"}, {"offer_id": "DUP-2"}], "last_id": ""}
+_fake_ozon_info = {"items": [
+    {"offer_id": "DUP-1", "name": "Один и тот же роман", "price": "300", "barcode": "9785111111111"},
+    {"offer_id": "DUP-2", "name": "Один и тот же роман", "price": "350", "barcode": "9785111111111"},
+]}
+_fake_ozon_stocks = {"items": [
+    {"offer_id": "DUP-1", "stocks": [{"present": 1, "reserved": 0}]},
+    {"offer_id": "DUP-2", "stocks": [{"present": 1, "reserved": 0}]},
+]}
+with SessionLocal() as s:
+    sync_marketplace(s, "ozon"); s.commit()
+with SessionLocal() as s:
+    assert s.query(Book).filter_by(sku="DUP-1").count() == 1, "первый экземпляр не создан"
+    assert s.query(Book).filter_by(sku="DUP-2").count() == 1, \
+        "второй экземпляр с тем же ISBN пропал (склеился с первым)"
+_fake_ozon_stocks = {"items": []}
+print("[ok] экземпляры с одинаковым ISBN заводятся отдельными книгами")
+
+# Восстанавливаем книгу OZ-1 — её ждут следующие секции.
+with SessionLocal() as s:
+    s.query(Listing).delete(); s.query(Book).delete()
+    b = Book(sku="OZ-1", title="Книга 1", status=BookStatus.IN_STOCK, price=150)
+    s.add(b); s.flush()
+    s.add(Listing(book_id=b.id, marketplace="ozon", external_id="OZ-1",
+                  stock_key="OZ-1", status=ListingStatus.ACTIVE))
+    s.commit()
 
 
 # --- 11. Импорт файлом (CSV) не снимает отсутствующие ----------------------
