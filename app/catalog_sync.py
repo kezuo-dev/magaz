@@ -152,12 +152,17 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             skipped += 1
             continue
 
-        # Новой книге нужно название (Book.title NOT NULL). Строку с SKU, но без
-        # названия пропускаем — иначе db.flush() упал бы с IntegrityError и откатил
-        # всю сверку площадки. Существующей книге название уже задано — не мешаем.
+        # Новой книге нужно название (Book.title NOT NULL). Ozon иногда возвращает
+        # карточку без имени из /v3/product/info/list (пакетный ответ неполный) — раньше
+        # такие книги тихо пропускались и не попадали в каталог, отсюда расхождение
+        # счётчиков с Ozon. Теперь используем SKU как запасное название: книга создастся,
+        # а название подтянется при следующей полной сверке, когда ответ будет полным.
         if book is None and not title:
-            skipped += 1
-            continue
+            if sku:
+                title = sku  # SKU как запасное название, лучше чем потерять книгу
+            else:
+                skipped += 1
+                continue
 
         if book:
             updated += 1
