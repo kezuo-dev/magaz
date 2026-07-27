@@ -187,10 +187,9 @@ table.grid tbody tr:last-child td { border-bottom: none; }
 table.grid tr.clickable { cursor: pointer; }
 
 /* Каталог: фиксированные ширины колонок, чтобы ничего не «съезжало». */
-.catalog-table { table-layout: fixed; min-width: 720px; }
-.catalog-table .c-sku { width: 150px; }
+.catalog-table { table-layout: fixed; min-width: 580px; }
+.catalog-table .c-sku { width: 220px; }
 .catalog-table .c-title { width: auto; }
-.catalog-table .c-price { width: 110px; }
 .catalog-table .c-status { width: 130px; }
 .catalog-table .c-mp { width: 110px; }
 .catalog-table td, .catalog-table th { overflow: hidden; }

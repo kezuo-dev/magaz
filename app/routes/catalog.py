@@ -18,6 +18,7 @@ from app.models import (
     Book,
     BookStatus,
     Listing,
+    ListingStatus,
     Marketplace,
     Order,
     SyncLog,
@@ -73,14 +74,23 @@ def _catalog_stats(db: Session) -> dict:
     withdrawn = db.scalar(
         select(func.count()).select_from(Book).where(Book.status == BookStatus.WITHDRAWN)
     ) or 0
-    on_ozon = db.scalar(
-        select(func.count(func.distinct(Listing.book_id))).where(Listing.marketplace == "ozon")
-    ) or 0
-    on_wb = db.scalar(
-        select(func.count(func.distinct(Listing.book_id))).where(
-            Listing.marketplace == "wildberries"
-        )
-    ) or 0
+    # Считаем только то, что реально продаётся на площадке: лот активен И книга в
+    # продаже. Снятый лот не считается, даже если книга ещё активна на другой
+    # площадке (например, продали на Ozon — в счётчике Ozon её уже нет).
+    def _on_marketplace(marketplace: str) -> int:
+        return db.scalar(
+            select(func.count(func.distinct(Listing.book_id)))
+            .select_from(Listing)
+            .join(Book, Book.id == Listing.book_id)
+            .where(
+                Listing.marketplace == marketplace,
+                Listing.status == ListingStatus.ACTIVE,
+                Book.status == BookStatus.IN_STOCK,
+            )
+        ) or 0
+
+    on_ozon = _on_marketplace("ozon")
+    on_wb = _on_marketplace("wildberries")
     return {
         "total": total,
         "in_stock": in_stock,

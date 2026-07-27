@@ -64,7 +64,6 @@
     <colgroup>
       <col class="c-sku">
       <col class="c-title">
-      <col class="c-price">
       <col class="c-status">
       <col class="c-mp">
     </colgroup>
@@ -72,7 +71,6 @@
       <tr>
         <th>Артикул</th>
         <th>Название</th>
-        <th class="col-price">Цена</th>
         <th>Статус</th>
         <th>Площадки</th>
       </tr>
@@ -93,7 +91,6 @@
           <a href="/books/{{ book.id }}">{{ book.title }}</a>
           {% if book.author %}<span class="row-sub">{{ book.author }}</span>{% endif %}
         </td>
-        <td class="col-price">{{ "%.0f ₽"|format(book.price) if book.price else "—" }}</td>
         <td>
           <span class="badge badge-{{ book_status_css(book.status) }}"
                 title="{{ book_status_hint(book.status) }}">{{ book_status_label(book.status) }}</span>
@@ -107,7 +104,7 @@
         </td>
       </tr>
       {% else %}
-      <tr class="empty-row"><td colspan="5" class="empty">
+      <tr class="empty-row"><td colspan="4" class="empty">
         <div class="empty-box">
           <div class="empty-icon">📚</div>
           <div>Каталог пуст. Нажмите «Обновить каталог» или загрузите выгрузку через «Обновление каталога».</div>
@@ -300,7 +297,6 @@
             'title="Скопировать артикул" aria-label="Скопировать артикул">' +
             '<span class="copy-icon" aria-hidden="true">⧉</span></button></div></td>' +
           '<td class="col-title"><a href="/books/' + b.id + '">' + esc(b.title) + '</a>' + author + '</td>' +
-          '<td class="col-price">' + esc(b.price) + '</td>' +
           '<td><span class="badge badge-' + esc(b.status_css) + '" title="' + esc(b.status_hint) + '">' +
             esc(b.status_label) + '</span></td>' +
           '<td class="mp-cells">' + mps + '</td></tr>';
