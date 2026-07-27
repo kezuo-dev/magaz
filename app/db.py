@@ -69,6 +69,13 @@ def ensure_schema() -> None:
                 if column not in listing_cols:
                     conn.execute(text(ddl))
 
+    # Статус «draft» («черновик») убран из логики: программа ничего не создаёт,
+    # она зеркалит площадки. Старые записи переводим в in_stock, иначе они висели
+    # бы с несуществующим статусом и не попадали ни в один фильтр.
+    if "books" in tables:
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE books SET status = 'in_stock' WHERE status = 'draft'"))
+
     # Индексы, добавленные после создания таблиц: create_all() их не досоздаёт.
     # Каталог сортируется по books.updated_at DESC — без индекса на 50k книгах
     # каждая страница вызывает полную сортировку таблицы.

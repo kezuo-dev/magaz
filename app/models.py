@@ -26,10 +26,21 @@ class Marketplace(str, Enum):
 
 
 class BookStatus(str, Enum):
-    DRAFT = "draft"          # черновик, ещё не выставлена
-    IN_STOCK = "in_stock"    # в наличии, выставлена хотя бы где-то
-    SOLD = "sold"            # продана — снимается со всех площадок
-    WITHDRAWN = "withdrawn"  # снята с продажи вручную
+    """Статус книги в каталоге. Выводится из состояния лотов на площадках.
+
+    Программа ничего не выставляет — она зеркалит площадки, поэтому статусов три:
+    - IN_STOCK  — «В продаже»: есть хотя бы один активный лот;
+    - SOLD      — «Продана»: ушла с продажи, и мы ВИДЕЛИ заказ на неё;
+    - WITHDRAWN — «Снята»: ушла с продажи без заказа (сняли вручную/карточки нет).
+
+    Значения строк оставлены прежними, чтобы не мигрировать существующую базу.
+    Старый DRAFT («черновик») убран: он не имел смысла в режиме мониторинга —
+    ensure_schema переводит такие записи в IN_STOCK.
+    """
+
+    IN_STOCK = "in_stock"
+    SOLD = "sold"
+    WITHDRAWN = "withdrawn"
 
 
 class ListingStatus(str, Enum):
@@ -59,7 +70,7 @@ class Book(Base):
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     description: Mapped[str | None] = mapped_column(Text, default=None)
     photos: Mapped[str | None] = mapped_column(Text, default=None)  # ссылки на фото через перевод строки
-    status: Mapped[str] = mapped_column(String(16), default=BookStatus.DRAFT, index=True)
+    status: Mapped[str] = mapped_column(String(16), default=BookStatus.IN_STOCK, index=True)
 
     # Категория/тип товара на площадках — обязательны при создании карточки.
     # Хранятся у книги (а не в ключах площадки), чтобы разные книги можно было

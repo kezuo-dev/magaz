@@ -30,6 +30,31 @@ from app.models import utcnow
 from app.security import decrypt_credentials
 
 
+def refresh_book_status(db: Session, book: Book) -> str:
+    """Пересчитать статус книги из состояния её лотов. Единая точка истины.
+
+    Правила (программа только зеркалит площадки, поэтому статусов три):
+    - есть хотя бы один активный лот  → IN_STOCK («В продаже»);
+    - активных лотов нет и по книге ЕСТЬ заказ → SOLD («Продана»);
+    - активных лотов нет и заказа не было → WITHDRAWN («Снята»).
+
+    Раньше статус зависел от того, КАКОЙ механизм заметил уход с продажи: опрос
+    заказов ставил SOLD, а слежение за остатками — WITHDRAWN, хотя это была одна
+    и та же продажа. Отсюда бралась путаница «снято/продано».
+    """
+    still_active = any(l.status == ListingStatus.ACTIVE for l in book.listings)
+    if still_active:
+        book.status = BookStatus.IN_STOCK
+        return book.status
+
+    # Заказ — доказательство продажи, независимо от того, кто её обнаружил.
+    has_order = db.scalar(
+        select(Order.id).where(Order.book_id == book.id).limit(1)
+    ) is not None
+    book.status = BookStatus.SOLD if has_order else BookStatus.WITHDRAWN
+    return book.status
+
+
 def _log(db: Session, *, marketplace, action, ok, message, book_id=None) -> None:
     db.add(
         SyncLog(
@@ -187,9 +212,10 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
             # выполнится — тогда заказ НЕ помечаем processed, чтобы позже (после
             # включения автоснятия) продажу можно было отзеркалить.
             done = withdraw_book_everywhere(db, book, except_marketplace=marketplace)
-            # Статус книги производный от лотов: SOLD, только если активных не осталось.
-            still_active = any(l.status == ListingStatus.ACTIVE for l in book.listings)
-            book.status = BookStatus.IN_STOCK if still_active else BookStatus.SOLD
+            # flush нужен, чтобы refresh_book_status увидел только что добавленный
+            # заказ (он ищет его в базе) и поставил «Продана», а не «Снята».
+            db.flush()
+            refresh_book_status(db, book)
             order.processed = done
             _log(db, marketplace=marketplace, action="order_sold", ok=True, book_id=book.id,
                  message=f"Заказ {info.external_order_id}: книга {book.sku} продана на {marketplace}")

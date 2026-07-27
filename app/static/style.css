@@ -155,6 +155,7 @@ a.btn.muted:hover, .btn.muted:hover { background: #e3e8f0; }
 }
 .stat-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); }
 .stat-card.stat-ok::before { background: var(--ok); }
+.stat-card.stat-sold::before { background: var(--danger); }
 .stat-card.stat-muted::before { background: var(--muted); }
 .stat-card.stat-mp::before { background: #8b5cf6; }
 .stat-num { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
@@ -197,9 +198,31 @@ table.grid tr.clickable { cursor: pointer; }
 .col-title { overflow: hidden; }
 .col-title a { font-weight: 500; color: var(--ink); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-title a:hover { color: var(--accent); }
+.row-sub { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .col-price { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 th.col-price { text-align: right; }
 .list-foot { margin: 12px 2px; font-size: 13px; }
+
+/* Ячейка артикула с кнопкой копирования. */
+.sku-cell { display: flex; align-items: center; gap: 5px; }
+.sku-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copy-btn {
+  flex-shrink: 0; padding: 3px 6px; height: 24px; min-width: 24px;
+  font-size: 13px; line-height: 1; border: 1px solid transparent;
+  background: transparent; color: var(--muted); cursor: pointer;
+  border-radius: 6px; box-shadow: none;
+  opacity: 0; transition: opacity .15s ease, background .15s ease, color .15s ease;
+}
+/* Показываем кнопку при наведении на ячейку. */
+.sku-cell:hover .copy-btn,
+.sku-cell:focus-within .copy-btn { opacity: 1; }
+.copy-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: transparent; box-shadow: none; }
+.copy-btn.copied { background: var(--ok-soft); color: var(--ok); border-color: transparent; opacity: 1; box-shadow: none; }
+.copy-btn.copy-fail { background: var(--danger-soft); color: var(--danger); border-color: transparent; opacity: 1; box-shadow: none; }
+.copy-icon { pointer-events: none; font-style: normal; }
+
+/* Подсказка к статусу книги. */
+.status-hint { margin-left: 8px; font-size: 12px; }
 
 .empty { padding: 0 !important; }
 .empty-box { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 56px 20px; color: var(--muted); text-align: center; }

@@ -6,11 +6,21 @@ from app.config import BASE_DIR
 templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
 
 # Русские подписи статусов для интерфейса. Ключи совпадают со значениями enum.
+# «draft» больше не используется, но подпись оставлена: в старых базах могли
+# остаться такие записи до миграции (ensure_schema переводит их в in_stock).
 BOOK_STATUS_LABELS = {
-    "draft": "Черновик",
-    "in_stock": "В наличии",
+    "in_stock": "В продаже",
     "sold": "Продана",
     "withdrawn": "Снята",
+    "draft": "В продаже",
+}
+
+# Пояснения к статусам — показываем подсказкой, чтобы логика была очевидна.
+BOOK_STATUS_HINTS = {
+    "in_stock": "Продаётся хотя бы на одной площадке",
+    "sold": "Ушла с продажи, был заказ",
+    "withdrawn": "Ушла с продажи без заказа (снята вручную или карточки нет)",
+    "draft": "Продаётся хотя бы на одной площадке",
 }
 
 LISTING_STATUS_LABELS = {
@@ -38,6 +48,15 @@ def book_status_label(value: str) -> str:
     return BOOK_STATUS_LABELS.get(value, value)
 
 
+def book_status_hint(value: str) -> str:
+    return BOOK_STATUS_HINTS.get(value, "")
+
+
+def book_status_css(value: str) -> str:
+    """Класс бейджа. Старый draft показываем как «в продаже»."""
+    return "in_stock" if value == "draft" else value
+
+
 def listing_status_label(value: str) -> str:
     return LISTING_STATUS_LABELS.get(value, value)
 
@@ -51,6 +70,8 @@ def marketplace_short(value: str) -> str:
 
 
 # Делаем доступными во всех шаблонах.
+templates.env.globals["book_status_hint"] = book_status_hint
+templates.env.globals["book_status_css"] = book_status_css
 templates.env.globals["book_status_label"] = book_status_label
 templates.env.globals["listing_status_label"] = listing_status_label
 templates.env.globals["marketplace_label"] = marketplace_label

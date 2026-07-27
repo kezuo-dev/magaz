@@ -14,7 +14,16 @@
   <section class="card">
     <h2 class="card-title">Сведения</h2>
     <dl class="prop-list">
-      <dt>Артикул (SKU)</dt><dd class="mono">{{ book.sku }}</dd>
+      <dt>Артикул (SKU)</dt>
+      <dd>
+        <div class="sku-cell">
+          <span class="mono sku-text">{{ book.sku }}</span>
+          <button type="button" class="copy-btn" data-copy="{{ book.sku }}"
+                  title="Скопировать артикул" aria-label="Скопировать артикул">
+            <span class="copy-icon" aria-hidden="true">⧉</span>
+          </button>
+        </div>
+      </dd>
       <dt>Автор</dt><dd>{{ book.author or "—" }}</dd>
       <dt>ISBN</dt><dd class="mono">{{ book.isbn or "—" }}</dd>
       <dt>Издательство</dt><dd>{{ book.publisher or "—" }}</dd>
@@ -22,7 +31,10 @@
       <dt>Состояние</dt><dd>{{ book.condition or "—" }}</dd>
       <dt>Цена</dt><dd>{{ "%.0f ₽"|format(book.price) if book.price else "—" }}</dd>
       <dt>Количество</dt><dd>{{ book.quantity }}</dd>
-      <dt>Статус</dt><dd><span class="badge badge-{{ book.status }}">{{ book_status_label(book.status) }}</span></dd>
+      <dt>Статус</dt><dd>
+        <span class="badge badge-{{ book_status_css(book.status) }}">{{ book_status_label(book.status) }}</span>
+        <span class="status-hint muted">{{ book_status_hint(book.status) }}</span>
+      </dd>
     </dl>
   </section>
 
@@ -68,3 +80,30 @@
   {% endif %}
 </section>
 {% endblock %}
+
+<script>
+(function () {
+  function flash(btn, ok) {
+    btn.classList.add(ok ? "copied" : "copy-fail");
+    const icon = btn.querySelector(".copy-icon");
+    const prev = icon.textContent;
+    icon.textContent = ok ? "✓" : "✕";
+    setTimeout(function () { btn.classList.remove("copied","copy-fail"); icon.textContent = prev; }, 1100);
+  }
+  document.querySelectorAll(".copy-btn").forEach(function (btn) {
+    btn.addEventListener("click", function (e) {
+      e.preventDefault();
+      const text = btn.dataset.copy || "";
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => flash(btn, true)).catch(() => flash(btn, false));
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.setAttribute("readonly",""); ta.style.cssText = "position:fixed;opacity:0";
+        document.body.appendChild(ta); ta.select();
+        try { flash(btn, document.execCommand("copy")); } catch { flash(btn, false); }
+        document.body.removeChild(ta);
+      }
+    });
+  });
+})();
+</script>

@@ -23,7 +23,13 @@ from app.models import (
     SyncLog,
 )
 from app.photos import UPLOAD_DIR
-from app.templating import book_status_label, listing_status_label, marketplace_short
+from app.templating import (
+    book_status_css,
+    book_status_hint,
+    book_status_label,
+    listing_status_label,
+    marketplace_short,
+)
 from app.templating import templates
 
 router = APIRouter()
@@ -60,11 +66,12 @@ def _catalog_stats(db: Session) -> dict:
     in_stock = db.scalar(
         select(func.count()).select_from(Book).where(Book.status == BookStatus.IN_STOCK)
     ) or 0
-    # Проданные и снятые считаем вместе как «ушли с продажи».
-    gone = db.scalar(
-        select(func.count()).select_from(Book).where(
-            Book.status.in_([BookStatus.SOLD, BookStatus.WITHDRAWN])
-        )
+    # Продано и снято — разные вещи: продажа подтверждена заказом, снятие нет.
+    sold = db.scalar(
+        select(func.count()).select_from(Book).where(Book.status == BookStatus.SOLD)
+    ) or 0
+    withdrawn = db.scalar(
+        select(func.count()).select_from(Book).where(Book.status == BookStatus.WITHDRAWN)
     ) or 0
     on_ozon = db.scalar(
         select(func.count(func.distinct(Listing.book_id))).where(Listing.marketplace == "ozon")
@@ -74,7 +81,14 @@ def _catalog_stats(db: Session) -> dict:
             Listing.marketplace == "wildberries"
         )
     ) or 0
-    return {"total": total, "in_stock": in_stock, "gone": gone, "on_ozon": on_ozon, "on_wb": on_wb}
+    return {
+        "total": total,
+        "in_stock": in_stock,
+        "sold": sold,
+        "withdrawn": withdrawn,
+        "on_ozon": on_ozon,
+        "on_wb": on_wb,
+    }
 
 
 def _page_numbers(page: int, pages: int) -> list[int]:
@@ -169,9 +183,12 @@ def api_books(
                 "id": b.id,
                 "sku": b.sku,
                 "title": b.title,
+                "author": b.author,
                 "price": f"{b.price:.0f} ₽" if b.price is not None else "—",
                 "status": b.status,
                 "status_label": book_status_label(b.status),
+                "status_hint": book_status_hint(b.status),
+                "status_css": book_status_css(b.status),
                 "listings": [
                     {"short": marketplace_short(l.marketplace), "status": l.status,
                      "status_label": listing_status_label(l.status)}

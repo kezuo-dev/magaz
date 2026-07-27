@@ -5,6 +5,11 @@ from starlette.testclient import TestClient
 
 from app.main import app
 
+from app.config import settings
+
+# Пароль берём из настроек (.env), а не зашиваем: у каждой установки он свой.
+APP_PW = settings.app_password
+
 c = TestClient(app)
 
 # 1. Без входа "/" редиректит на /login
@@ -17,8 +22,8 @@ r = c.post("/login", data={"password": "wrong"}, follow_redirects=False)
 assert r.status_code == 401, r.status_code
 print("[ok] неверный пароль отклонён")
 
-# 3. Верный пароль (из .env.example по умолчанию changeme)
-r = c.post("/login", data={"password": "changeme"}, follow_redirects=False)
+# 3. Верный пароль (из настроек текущей установки)
+r = c.post("/login", data={"password": APP_PW}, follow_redirects=False)
 assert r.status_code == 303 and r.headers["location"] == "/", r.status_code
 print("[ok] вход выполнен")
 

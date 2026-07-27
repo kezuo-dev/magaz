@@ -24,11 +24,15 @@
   </div>
   <div class="stat-card stat-ok">
     <div class="stat-num">{{ stats.in_stock }}</div>
-    <div class="stat-label">В наличии</div>
+    <div class="stat-label">В продаже</div>
+  </div>
+  <div class="stat-card stat-sold">
+    <div class="stat-num">{{ stats.sold }}</div>
+    <div class="stat-label">Продано</div>
   </div>
   <div class="stat-card stat-muted">
-    <div class="stat-num">{{ stats.gone }}</div>
-    <div class="stat-label">Продано / снято</div>
+    <div class="stat-num">{{ stats.withdrawn }}</div>
+    <div class="stat-label">Снято</div>
   </div>
   <div class="stat-card stat-mp">
     <div class="stat-num">{{ stats.on_ozon }}</div>
@@ -75,11 +79,25 @@
     </thead>
     <tbody id="books-body">
       {% for book in books %}
-      <tr onclick="location.href='/books/{{ book.id }}'" class="clickable">
-        <td class="mono">{{ book.sku }}</td>
-        <td class="col-title"><a href="/books/{{ book.id }}">{{ book.title }}</a></td>
+      <tr class="clickable" data-href="/books/{{ book.id }}">
+        <td>
+          <div class="sku-cell">
+            <span class="mono sku-text">{{ book.sku }}</span>
+            <button type="button" class="copy-btn" data-copy="{{ book.sku }}"
+                    title="Скопировать артикул" aria-label="Скопировать артикул">
+              <span class="copy-icon" aria-hidden="true">⧉</span>
+            </button>
+          </div>
+        </td>
+        <td class="col-title">
+          <a href="/books/{{ book.id }}">{{ book.title }}</a>
+          {% if book.author %}<span class="row-sub">{{ book.author }}</span>{% endif %}
+        </td>
         <td class="col-price">{{ "%.0f ₽"|format(book.price) if book.price else "—" }}</td>
-        <td><span class="badge badge-{{ book.status }}">{{ book_status_label(book.status) }}</span></td>
+        <td>
+          <span class="badge badge-{{ book_status_css(book.status) }}"
+                title="{{ book_status_hint(book.status) }}">{{ book_status_label(book.status) }}</span>
+        </td>
         <td class="mp-cells">
           {% for l in book.listings %}
           <span class="mp mp-{{ l.status }}" title="{{ marketplace_label(l.marketplace) }}: {{ listing_status_label(l.status) }}">{{ marketplace_short(l.marketplace) }}</span>
@@ -195,6 +213,60 @@
     });
   }
 
+  // ---- Копирование артикула и переход по строке ----
+  // Делегирование на tbody: обработчики продолжают работать после того, как
+  // живой поиск перерисовал строки.
+  (function () {
+    const body = document.getElementById("books-body");
+
+    function flash(btn, ok) {
+      btn.classList.add(ok ? "copied" : "copy-fail");
+      const icon = btn.querySelector(".copy-icon");
+      const prev = icon.textContent;
+      icon.textContent = ok ? "✓" : "✕";
+      setTimeout(function () {
+        btn.classList.remove("copied", "copy-fail");
+        icon.textContent = prev;
+      }, 1100);
+    }
+
+    function copyText(text, btn) {
+      // clipboard API доступен только по HTTPS/localhost — иначе запасной путь.
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text)
+          .then(() => flash(btn, true))
+          .catch(() => flash(btn, false));
+        return;
+      }
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      flash(btn, ok);
+    }
+
+    body.addEventListener("click", function (e) {
+      const btn = e.target.closest(".copy-btn");
+      if (btn) {
+        // Копируем, не открывая карточку книги.
+        e.preventDefault();
+        e.stopPropagation();
+        copyText(btn.dataset.copy, btn);
+        return;
+      }
+      // Клик по ссылке отработает сам — не мешаем.
+      if (e.target.closest("a")) return;
+      const row = e.target.closest("tr.clickable");
+      if (row && row.dataset.href) location.href = row.dataset.href;
+    });
+  })();
+
   // ---- Живой поиск по мере ввода ----
   (function () {
     const input = document.getElementById("search-input");
@@ -219,13 +291,18 @@
       }
       body.innerHTML = items.map(function (b) {
         const mps = b.listings.length
-          ? b.listings.map(l => '<span class="mp mp-' + l.status + '" title="' + esc(l.status_label) + '">' + esc(l.short) + '</span>').join("")
+          ? b.listings.map(l => '<span class="mp mp-' + esc(l.status) + '" title="' + esc(l.status_label) + '">' + esc(l.short) + '</span>').join("")
           : '<span class="muted">—</span>';
-        return '<tr class="clickable" onclick="location.href=\'/books/' + b.id + '\'">' +
-          '<td class="mono">' + esc(b.sku) + '</td>' +
-          '<td class="col-title"><a href="/books/' + b.id + '">' + esc(b.title) + '</a></td>' +
+        const author = b.author ? '<span class="row-sub">' + esc(b.author) + '</span>' : '';
+        return '<tr class="clickable" data-href="/books/' + b.id + '">' +
+          '<td><div class="sku-cell"><span class="mono sku-text">' + esc(b.sku) + '</span>' +
+            '<button type="button" class="copy-btn" data-copy="' + esc(b.sku) + '" ' +
+            'title="Скопировать артикул" aria-label="Скопировать артикул">' +
+            '<span class="copy-icon" aria-hidden="true">⧉</span></button></div></td>' +
+          '<td class="col-title"><a href="/books/' + b.id + '">' + esc(b.title) + '</a>' + author + '</td>' +
           '<td class="col-price">' + esc(b.price) + '</td>' +
-          '<td><span class="badge badge-' + b.status + '">' + esc(b.status_label) + '</span></td>' +
+          '<td><span class="badge badge-' + esc(b.status_css) + '" title="' + esc(b.status_hint) + '">' +
+            esc(b.status_label) + '</span></td>' +
           '<td class="mp-cells">' + mps + '</td></tr>';
       }).join("");
     }

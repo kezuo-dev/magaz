@@ -41,7 +41,7 @@ from app.models import (
     utcnow,
 )
 from app.security import decrypt_credentials
-from app.sync import withdraw_book_everywhere
+from app.sync import refresh_book_status, withdraw_book_everywhere
 
 # Поля книги, на которые сопоставляются колонки выгрузки (ключи = поля модели).
 TARGET_FIELDS = {
@@ -82,15 +82,14 @@ def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing)
     """Единый путь снятия книги, пропавшей/проданной на площадке `marketplace`.
 
     Помечаем лот этой площадки снятым (остатка там уже нет — живой вызов не нужен)
-    и кросс-снимаем с остальных площадок. Статус книги делаем производным от лотов:
-    книга «снята», только если НЕ осталось активных лотов. Это убирает «раскол»
-    (снята на Ozon, но висит на WB) — пока WB-лот активен, книга остаётся в наличии.
+    и кросс-снимаем с остальных площадок. Статус книги пересчитывается единой
+    функцией refresh_book_status: пока активен хоть один лот — книга в продаже;
+    если лотов не осталось, «Продана» ставится при наличии заказа, иначе «Снята».
     """
     listing.status = ListingStatus.WITHDRAWN
     listing.last_synced_at = utcnow()
     withdraw_book_everywhere(db, book, except_marketplace=marketplace)
-    still_active = any(l.status == ListingStatus.ACTIVE for l in book.listings)
-    book.status = BookStatus.IN_STOCK if still_active else BookStatus.WITHDRAWN
+    refresh_book_status(db, book)
 
 
 def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping: dict) -> dict:

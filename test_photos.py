@@ -25,13 +25,13 @@ print("[ok] навигация: только актуальные пункты �
 # 2. Заводим книгу напрямую в базе (импорт/сверка — единственные пути наполнения).
 with SessionLocal() as s:
     s.query(Book).delete()
-    s.add(Book(sku="PHOTO-1", title="Книга", status=BookStatus.DRAFT, price=100))
+    s.add(Book(sku="PHOTO-1", title="Книга", status=BookStatus.WITHDRAWN, price=100))
     s.commit()
 
 # 3. Каталог — чистый мониторинг: русские статусы, никаких действий над книгами.
 r = c.get("/")
-assert "Черновик" in r.text, "статус книги не локализован (ожидали 'Черновик')"
-assert "draft</span>" not in r.text, "в каталоге остался английский статус"
+assert "Снята" in r.text, "статус книги не локализован (ожидали 'Снята')"
+assert "withdrawn</span>" not in r.text, "в каталоге остался английский статус"
 assert 'action="/books/bulk"' not in r.text, "осталась форма массовых действий"
 assert 'value="publish"' not in r.text and 'value="withdraw"' not in r.text, "остались кнопки действий"
 assert "rowcheck" not in r.text, "остались чекбоксы строк"
