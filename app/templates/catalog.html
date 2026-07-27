@@ -96,7 +96,7 @@
                 title="{{ book_status_hint(book.status) }}">{{ book_status_label(book.status) }}</span>
         </td>
         <td class="mp-cells">
-          {% for l in book.listings if l.status == 'active' %}
+          {% for l in sort_listings(book.listings) if l.status == 'active' %}
           <span class="mp mp-{{ l.status }}" title="{{ marketplace_label(l.marketplace) }}: {{ listing_status_label(l.status) }}">{{ marketplace_short(l.marketplace) }}</span>
           {% else %}
           <span class="muted">—</span>

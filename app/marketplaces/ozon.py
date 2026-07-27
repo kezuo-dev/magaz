@@ -191,12 +191,12 @@ class OzonClient(MarketplaceClient):
                 info = self._post(
                     "/v3/product/info/list", {"offer_id": offer_ids}
                 )
+                returned_ids: set[str] = set()
                 for prod in (info.get("result") or {}).get("items") or info.get("items") or []:
                     offer_id = prod.get("offer_id")
-                    # Ozon отдаёт цены строками ("1990.0000"), а marketing_price
-                    # при отсутствии акции — "0". Голый `or` тогда берёт "0" вместо
-                    # реальной цены, поэтому парсим в число и берём акционную,
-                    # только если она положительная.
+                    if not offer_id:
+                        continue
+                    returned_ids.add(str(offer_id))
                     price = _first_positive_price(
                         prod.get("marketing_price"), prod.get("price")
                     )
@@ -208,16 +208,31 @@ class OzonClient(MarketplaceClient):
                         {
                             "sku": offer_id,
                             "external_id": offer_id,
-                            # Остаток Ozon читается по offer_id — он же ключ остатка.
                             "stock_key": offer_id,
-                            # Список отфильтрован visibility=IN_SALE — значит карточка
-                            # реально в продаже. Мёртвых карточек тут не будет.
                             "in_sale": True,
                             "title": prod.get("name"),
                             "isbn": barcode,
                             "price": str(price) if price not in (None, "") else None,
                         }
                     )
+
+                # Ozon иногда не возвращает часть offer_id из /info/list (неполный батч).
+                # Раньше эти книги тихо терялись — отсюда расхождение счётчика с Ozon.
+                # Добавляем их с offer_id как именем: они в продаже (пришли из IN_SALE
+                # фильтра), имя подтянется при следующей сверке когда ответ будет полным.
+                for oid in offer_ids:
+                    if str(oid) not in returned_ids:
+                        rows.append(
+                            {
+                                "sku": oid,
+                                "external_id": oid,
+                                "stock_key": oid,
+                                "in_sale": True,
+                                "title": None,   # заполнится при следующей сверке
+                                "isbn": None,
+                                "price": None,
+                            }
+                        )
 
             last_id = result.get("last_id") or ""
             if not last_id:

@@ -9,7 +9,7 @@ import shutil
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
@@ -30,6 +30,7 @@ from app.templating import (
     book_status_label,
     listing_status_label,
     marketplace_short,
+    sort_listings,
 )
 from app.templating import templates
 
@@ -59,6 +60,16 @@ def _filtered_books_query(q: str, status: str, marketplace: str):
     if marketplace:
         stmt = stmt.where(Book.listings.any(Listing.marketplace == marketplace))
     return stmt
+
+
+def _sorted_books_query(stmt):
+    """Порядок списка: сначала книги в продаже, затем проданные и снятые.
+
+    Внутри группы — свежие изменения сверху. Так актуальный товар всегда наверху,
+    а история (продано/снято) не мешается в начале каталога.
+    """
+    in_sale_first = case((Book.status == BookStatus.IN_STOCK, 0), else_=1)
+    return stmt.order_by(in_sale_first, Book.updated_at.desc())
 
 
 def _catalog_stats(db: Session) -> dict:
@@ -140,7 +151,7 @@ def index(
     # Зажимаем номер страницы в допустимый диапазон: ввод вручную может быть любым.
     page = min(max(1, page), pages)
     books = db.scalars(
-        stmt.order_by(Book.updated_at.desc())
+        _sorted_books_query(stmt)
         .offset((page - 1) * PAGE_SIZE)
         .limit(PAGE_SIZE)
     ).all()
@@ -181,7 +192,7 @@ def api_books(
     pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     page = min(max(1, page), pages)
     books = db.scalars(
-        stmt.order_by(Book.updated_at.desc())
+        _sorted_books_query(stmt)
         .offset((page - 1) * PAGE_SIZE)
         .limit(PAGE_SIZE)
     ).all()
@@ -199,10 +210,13 @@ def api_books(
                 "status_label": book_status_label(b.status),
                 "status_hint": book_status_hint(b.status),
                 "status_css": book_status_css(b.status),
+                # Только активные лоты, в стабильном порядке (Ozon → WB): снятый лот
+                # в списке лишь путал бы («OZ снято» у книги, которой на Ozon нет).
                 "listings": [
                     {"short": marketplace_short(l.marketplace), "status": l.status,
                      "status_label": listing_status_label(l.status)}
-                    for l in b.listings
+                    for l in sort_listings(b.listings)
+                    if l.status == ListingStatus.ACTIVE
                 ],
             }
         )

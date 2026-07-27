@@ -69,6 +69,17 @@ def marketplace_short(value: str) -> str:
     return MARKETPLACE_SHORT.get(value, (value or "")[:2].upper())
 
 
+# Порядок площадок в индикаторах: всегда OZ, потом WB — чтобы столбец читался
+# ровно, а не вразброс (порядок лотов в базе зависит от того, какая сверка прошла
+# первой).
+MARKETPLACE_ORDER = {"ozon": 0, "wildberries": 1}
+
+
+def sort_listings(listings) -> list:
+    """Лоты в стабильном порядке площадок (Ozon → Wildberries → прочие)."""
+    return sorted(listings, key=lambda l: (MARKETPLACE_ORDER.get(l.marketplace, 99), l.marketplace))
+
+
 # Делаем доступными во всех шаблонах.
 templates.env.globals["book_status_hint"] = book_status_hint
 templates.env.globals["book_status_css"] = book_status_css
@@ -76,3 +87,4 @@ templates.env.globals["book_status_label"] = book_status_label
 templates.env.globals["listing_status_label"] = listing_status_label
 templates.env.globals["marketplace_label"] = marketplace_label
 templates.env.globals["marketplace_short"] = marketplace_short
+templates.env.globals["sort_listings"] = sort_listings

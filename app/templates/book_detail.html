@@ -64,7 +64,7 @@
     <table class="grid">
       <thead><tr><th>Площадка</th><th>ID лота</th><th>Статус</th><th>Синхронизация</th></tr></thead>
       <tbody>
-        {% for l in book.listings %}
+        {% for l in sort_listings(book.listings) %}
         <tr>
           <td>{{ marketplace_label(l.marketplace) }}</td>
           <td class="mono">{{ l.external_id or "—" }}</td>

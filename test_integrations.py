@@ -544,6 +544,37 @@ _fake_wb_stocks = []
 print("[ok] сверка: новые карточки не в продаже (0 / без баркода) не загружаются")
 
 
+# --- 10b2. Ozon: карточки, потерянные в ответе деталей, всё равно попадают ---
+# /v3/product/list вернул 3 offer_id, а /v3/product/info/list — детали только по
+# одному (Ozon отдаёт пакетный ответ неполным). Раньше две книги молча терялись —
+# отсюда расхождение счётчика с кабинетом Ozon. Теперь заводим их по offer_id.
+with SessionLocal() as s:
+    s.query(Order).delete(); s.query(Listing).delete(); s.query(Book).delete(); s.commit()
+_fake_ozon_list = {"items": [{"offer_id": "LOST-1"}, {"offer_id": "LOST-2"}, {"offer_id": "FULL-1"}],
+                   "last_id": ""}
+_fake_ozon_info = {"items": [
+    {"offer_id": "FULL-1", "name": "Полная карточка", "price": "300", "barcode": "bc-full"},
+]}
+with SessionLocal() as s:
+    res = sync_marketplace(s, "ozon"); s.commit()
+    assert res["created"] == 3, f"ожидали 3 книги (1 полная + 2 потерянные), создано {res['created']}"
+with SessionLocal() as s:
+    full = s.query(Book).filter_by(sku="FULL-1").one()
+    assert full.title == "Полная карточка", "детали полной карточки не применились"
+    for lost in ("LOST-1", "LOST-2"):
+        b = s.query(Book).filter_by(sku=lost).one()
+        assert b.title == lost, f"{lost}: ожидали SKU как запасное название, получили {b.title}"
+        lot = s.query(Listing).filter_by(book_id=b.id, marketplace="ozon").one()
+        assert lot.status == ListingStatus.ACTIVE, f"{lost}: лот должен быть активным"
+        assert lot.stock_key == lost, f"{lost}: ключ остатка не проставлен"
+print("[ok] Ozon: карточки без деталей не теряются (счётчик сходится с кабинетом)")
+
+with SessionLocal() as s:
+    s.query(Order).delete(); s.query(Listing).delete(); s.query(Book).delete(); s.commit()
+_fake_ozon_list = {"items": [], "last_id": ""}
+_fake_ozon_info = {"items": []}
+
+
 # --- 10c. WB снимает по баркоду (stock_key), а не по vendorCode -------------
 # Книга на Ozon+WB; баркод WB отличается от vendorCode. При кросс-снятии WB должен
 # обнулить остаток по баркоду — иначе книга «зависнет» на WB.
