@@ -1,5 +1,7 @@
 .env
 .env.prod
+# Копия .env без точки (так файл приезжает с рабочей машины) — тоже с паролями.
+/env
 data/
 __pycache__/
 *.pyc
@@ -16,3 +18,4 @@ memory/
 *.xlsx
 wb_only_sku.txt
 app/static/uploads/
+.DS_Store

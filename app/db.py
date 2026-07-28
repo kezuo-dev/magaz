@@ -69,6 +69,13 @@ def ensure_schema() -> None:
                 if column not in listing_cols:
                     conn.execute(text(ddl))
 
+    # Колонка cancelled в таблице orders для обработки отменённых заказов.
+    if "orders" in tables:
+        order_cols = {col["name"] for col in inspector.get_columns("orders")}
+        if "cancelled" not in order_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE orders ADD COLUMN cancelled BOOLEAN DEFAULT 0"))
+
     # Статус «draft» («черновик») убран из логики: программа ничего не создаёт,
     # она зеркалит площадки. Старые записи переводим в in_stock, иначе они висели
     # бы с несуществующим статусом и не попадали ни в один фильтр.

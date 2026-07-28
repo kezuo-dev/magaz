@@ -144,7 +144,10 @@ class Order(Base):
     book_id: Mapped[int | None] = mapped_column(ForeignKey("books.id"), index=True, default=None)
     external_sku: Mapped[str | None] = mapped_column(String(128), default=None)  # что прислала площадка
     processed: Mapped[bool] = mapped_column(default=False, index=True)  # обработан ли (снята ли книга)
+    cancelled: Mapped[bool] = mapped_column(default=False, index=True)  # отменён ли заказ
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    book: Mapped["Book"] = relationship()
 
 
 class SyncLog(Base):

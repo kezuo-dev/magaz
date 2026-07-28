@@ -56,6 +56,14 @@
     <option value="{{ s.value }}" {% if status == s.value %}selected{% endif %}>{{ book_status_label(s.value) }}</option>
     {% endfor %}
   </select>
+  <select name="marketplace" id="filter-marketplace">
+    <option value="">Все площадки</option>
+    <option value="ozon_only" {% if marketplace == 'ozon_only' %}selected{% endif %}>Только на Ozon</option>
+    <option value="wb_only" {% if marketplace == 'wb_only' %}selected{% endif %}>Только на WB</option>
+    {% for mp in marketplaces %}
+    <option value="{{ mp.value }}" {% if marketplace == mp.value %}selected{% endif %}>На {{ marketplace_label(mp.value) }}</option>
+    {% endfor %}
+  </select>
   <button type="submit" class="btn-search-submit">Искать</button>
 </form>
 
@@ -308,7 +316,8 @@
     function run() {
       const mySeq = ++seq;
       spin.hidden = false;
-      const params = new URLSearchParams({ q: input.value, status: statusSel.value });
+      const marketplaceSel = document.getElementById("filter-marketplace");
+      const params = new URLSearchParams({ q: input.value, status: statusSel.value, marketplace: marketplaceSel.value });
       fetch("/api/books?" + params.toString())
         .then(r => r.json())
         .then(function (data) {
@@ -326,6 +335,8 @@
 
     input.addEventListener("input", schedule);
     statusSel.addEventListener("change", run);
+    const marketplaceSel = document.getElementById("filter-marketplace");
+    marketplaceSel.addEventListener("change", run);
     // Не перезагружаем страницу по Enter — поиск уже живой.
     document.getElementById("filter-form").addEventListener("submit", function (e) { e.preventDefault(); run(); });
   })();

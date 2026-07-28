@@ -211,9 +211,11 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             if stock_key:
                 listing.stock_key = stock_key
 
-        if not in_sale:
-            # Больше не продаётся на площадке (остаток 0 / пропал баркод) → снимаем
-            # лот и кросс-снимаем с других площадок.
+        if not in_sale or out_of_stock:
+            # Больше не продаётся на площадке (остаток 0 / пропал баркод / in_sale=False) →
+            # снимаем лот и кросс-снимаем с других площадок. Проверяем и out_of_stock явно:
+            # если площадка вернула остаток 0, книга не должна висеть в продаже, даже если
+            # in_sale случайно проставился в True (например, склад не настроен).
             _cross_withdraw(db, book, marketplace, listing)
         else:
             listing.status = ListingStatus.ACTIVE

@@ -267,3 +267,24 @@ class WBClient(MarketplaceClient):
                 )
             )
         return result
+
+    def fetch_cancelled_orders(self) -> list[str]:
+        """Получить отменённые сборочные задания.
+
+        WB держит отменённые заказы в отдельном эндпоинте /api/v3/orders/cancel.
+        Возвращаем ID отменённых заказов за последнее время.
+        """
+        try:
+            data = self._request(
+                "GET", f"{MARKETPLACE_URL}/api/v3/orders/cancel"
+            )
+            result: list[str] = []
+            for order in data.get("orders", []):
+                order_id = order.get("id") or order.get("rid")
+                if order_id:
+                    result.append(str(order_id))
+            return result
+        except MarketplaceError:
+            # Если эндпоинт не поддерживается или ошибка доступа — возвращаем пустой список,
+            # не роняя весь процесс. Отмены просто не обработаются в этот раз.
+            return []

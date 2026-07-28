@@ -57,8 +57,34 @@ def _filtered_books_query(q: str, status: str, marketplace: str):
     if status:
         stmt = stmt.where(Book.status == status)
     # Фильтр по площадке: оставляем книги, у которых есть лот на этой площадке.
-    if marketplace:
-        stmt = stmt.where(Book.listings.any(Listing.marketplace == marketplace))
+    # Специальные фильтры "только на X": книга должна быть ТОЛЬКО на одной площадке.
+    if marketplace == "ozon_only":
+        # Есть активный лот на Ozon, но нет активных лотов на WB
+        stmt = stmt.where(
+            Book.listings.any(
+                (Listing.marketplace == "ozon") & (Listing.status == ListingStatus.ACTIVE)
+            ),
+            ~Book.listings.any(
+                (Listing.marketplace == "wildberries") & (Listing.status == ListingStatus.ACTIVE)
+            ),
+        )
+    elif marketplace == "wb_only":
+        # Есть активный лот на WB, но нет активных лотов на Ozon
+        stmt = stmt.where(
+            Book.listings.any(
+                (Listing.marketplace == "wildberries") & (Listing.status == ListingStatus.ACTIVE)
+            ),
+            ~Book.listings.any(
+                (Listing.marketplace == "ozon") & (Listing.status == ListingStatus.ACTIVE)
+            ),
+        )
+    elif marketplace:
+        # Обычный фильтр: есть активный лот на указанной площадке (может быть и на других)
+        stmt = stmt.where(
+            Book.listings.any(
+                (Listing.marketplace == marketplace) & (Listing.status == ListingStatus.ACTIVE)
+            )
+        )
     return stmt
 
 

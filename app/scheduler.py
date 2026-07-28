@@ -20,7 +20,7 @@ from app.catalog_sync import sync_all, watch_all_stocks
 from app.config import settings
 from app.db import SessionLocal
 from app.models import MarketplaceAccount
-from app.sync import poll_marketplace_orders
+from app.sync import poll_marketplace_orders, process_cancelled_orders
 
 logger = logging.getLogger("scheduler")
 
@@ -41,6 +41,24 @@ def poll_all_marketplaces() -> None:
             except Exception:  # noqa: BLE001 — один сбой не должен останавливать остальные площадки
                 db.rollback()
                 logger.exception("Сбой опроса заказов %s", marketplace)
+    finally:
+        db.close()
+
+
+def poll_all_cancellations() -> None:
+    """Один проход проверки отменённых заказов по всем включённым площадкам."""
+    db = SessionLocal()
+    try:
+        enabled = db.scalars(
+            select(MarketplaceAccount.marketplace).where(MarketplaceAccount.enabled == True)  # noqa: E712
+        ).all()
+        for marketplace in enabled:
+            try:
+                process_cancelled_orders(db, marketplace)
+                db.commit()
+            except Exception:  # noqa: BLE001 — один сбой не должен останавливать остальные площадки
+                db.rollback()
+                logger.exception("Сбой проверки отмен %s", marketplace)
     finally:
         db.close()
 
@@ -94,6 +112,14 @@ def start_scheduler() -> None:
         trigger="interval",
         minutes=settings.poll_interval_minutes,
         id="poll_orders",
+        max_instances=1,
+        coalesce=True,
+    )
+    _scheduler.add_job(
+        poll_all_cancellations,
+        trigger="interval",
+        minutes=settings.poll_interval_minutes,  # та же частота, что и опрос заказов
+        id="poll_cancellations",
         max_instances=1,
         coalesce=True,
     )

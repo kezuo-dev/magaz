@@ -3,7 +3,8 @@
 Здесь собрано всё, что «ходит наружу» из бизнес-логики:
 - withdraw_book — снять одну книгу с одной площадки;
 - withdraw_book_everywhere — снять книгу со всех площадок (для авто-снятия);
-- poll_marketplace_orders — опрос заказов и обработка продаж (кросс-снятие).
+- poll_marketplace_orders — опрос заказов и обработка продаж (кросс-снятие);
+- process_cancelled_orders — обработка отменённых заказов (восстановление книги).
 
 Выставление книг убрано: программа только отслеживает каталог площадок и снимает
 проданное. Наполнение каталога идёт сверкой (см. app/catalog_sync.py).
@@ -13,8 +14,8 @@
 """
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import select, or_
+from sqlalchemy.orm import Session, selectinload
 
 from app.marketplaces import MarketplaceError, get_client, is_supported
 from app.models import (
@@ -227,3 +228,69 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
         _log(db, marketplace=marketplace, action="poll_orders", ok=True,
              message=f"Новых заказов: {new_count}")
     return new_count
+
+
+def process_cancelled_orders(db: Session, marketplace: str) -> int:
+    """Обработать отменённые заказы площадки. Возвращает число обработанных отмен.
+
+    Когда заказ отменяется, книга должна вернуться в продажу на всех площадках.
+    Помечаем заказ как отменённый, восстанавливаем лот на площадке продажи в ACTIVE,
+    и восстанавливаем книгу в статус IN_STOCK.
+    """
+    client = _get_active_client(db, marketplace)
+    if client is None:
+        return 0
+
+    try:
+        cancelled_ids = client.fetch_cancelled_orders()
+    except MarketplaceError as exc:
+        _log(db, marketplace=marketplace, action="poll_cancellations", ok=False, message=str(exc))
+        return 0
+
+    if not cancelled_ids:
+        return 0
+
+    processed_count = 0
+    for order_id in cancelled_ids:
+        # Для Ozon: ключ заказа может быть "order_number#sku" (несколько книг в одном
+        # отправлении), но fetch_cancelled_orders возвращает только order_number.
+        # Поэтому ищем все заказы, где external_order_id начинается с order_id или равен ему.
+        orders = db.scalars(
+            select(Order).options(selectinload(Order.book).selectinload(Book.listings))
+            .where(
+                Order.marketplace == marketplace,
+                Order.cancelled == False,  # noqa: E712
+                or_(
+                    Order.external_order_id == order_id,
+                    Order.external_order_id.startswith(order_id + "#"),
+                ),
+            )
+        ).all()
+
+        for order in orders:
+            if not order.book:
+                # Заказ без книги (не смогли сопоставить по SKU) — просто помечаем отменённым.
+                order.cancelled = True
+                continue
+
+            book = order.book
+            # Восстанавливаем лот на площадке, где был заказ, в ACTIVE.
+            listing = next((l for l in book.listings if l.marketplace == marketplace), None)
+            if listing:
+                listing.status = ListingStatus.ACTIVE
+                listing.last_synced_at = utcnow()
+                listing.last_error = None
+
+            # Пересчитываем статус книги. Если есть хотя бы один активный лот (в том числе
+            # только что восстановленный) — книга возвращается в продажу.
+            refresh_book_status(db, book)
+
+            order.cancelled = True
+            processed_count += 1
+            _log(db, marketplace=marketplace, action="order_cancelled", ok=True, book_id=book.id,
+                 message=f"Заказ {order_id} отменён: книга {book.sku} восстановлена в продажу")
+
+    if processed_count:
+        _log(db, marketplace=marketplace, action="poll_cancellations", ok=True,
+             message=f"Обработано отмен: {processed_count}")
+    return processed_count

@@ -330,3 +330,46 @@ class OzonClient(MarketplaceClient):
                 break
             offset += limit
         return result
+
+    def fetch_cancelled_orders(self) -> list[str]:
+        """Получить отменённые отправления FBS за последние дни.
+
+        Ozon отправления могут быть отменены покупателем или системой. Статус
+        'cancelled' означает, что заказ не будет отгружен — книга должна вернуться
+        в продажу. Используем тот же метод /v3/posting/fbs/list с фильтром статуса.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(days=7)  # смотрим отмены за неделю
+        fmt = "%Y-%m-%dT%H:%M:%S.000Z"
+        result: list[str] = []
+        limit = 100
+        offset = 0
+        while offset < 10000:
+            data = self._post(
+                "/v3/posting/fbs/list",
+                {
+                    "dir": "DESC",
+                    "filter": {
+                        "since": since.strftime(fmt),
+                        "to": now.strftime(fmt),
+                        "status": "cancelled",  # только отменённые
+                    },
+                    "limit": limit,
+                    "offset": offset,
+                    "with": {},
+                },
+            )
+            postings = (data.get("result") or {}).get("postings") or []
+            for posting in postings:
+                order_number = posting.get("posting_number") or posting.get("order_number")
+                if order_number:
+                    # Возвращаем order_number без артикула — отменяется всё отправление целиком.
+                    # Но в базе у нас ключ = order_number#sku (одна строка на книгу в отправлении).
+                    # Поэтому на стороне обработчика будем искать все заказы, начинающиеся с order_number.
+                    result.append(str(order_number))
+            if len(postings) < limit:
+                break
+            offset += limit
+        return result

@@ -27,8 +27,11 @@ import app.marketplaces.ozon as ozon
 import app.marketplaces.wildberries as wb
 
 
-ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "1908")
-APP_PW = os.environ.get("APP_PASSWORD", "050620")
+from app.config import settings
+
+# Пароли берём из настроек установки (.env), а не зашитые: у каждой установки свои.
+ADMIN_PW = settings.admin_password
+APP_PW = settings.app_password
 
 c = TestClient(app)
 c.post("/login", data={"password": APP_PW})

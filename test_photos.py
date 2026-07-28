@@ -5,12 +5,14 @@
 """
 from starlette.testclient import TestClient
 
+from app.config import settings
 from app.db import SessionLocal
 from app.main import app
 from app.models import Book, BookStatus
 
 c = TestClient(app)
-c.post("/login", data={"password": "050620"})
+# Пароль берём из настроек (.env), а не зашитый: у каждой установки свой.
+c.post("/login", data={"password": settings.app_password})
 
 # 1. Активная вкладка: на "/" подсвечен Каталог, на /import — Обновление каталога
 r = c.get("/")

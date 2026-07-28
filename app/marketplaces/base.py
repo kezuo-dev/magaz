@@ -48,6 +48,14 @@ class MarketplaceClient:
         """Вернуть недавние заказы площадки. Дедупликацию делает вызывающий код."""
         raise NotImplementedError
 
+    def fetch_cancelled_orders(self) -> list[str]:
+        """Вернуть ID отменённых заказов. По умолчанию не реализовано (опционально).
+
+        Возвращает список external_order_id отменённых заказов. Если площадка не
+        поддерживает отслеживание отмен, возвращает пустой список.
+        """
+        return []
+
     def fetch_stocks(self, keys: list[str]) -> dict[str, int]:
         """Остатки FBS по ключам остатка (stock_key лотов). Возвращает {ключ: остаток}.
 
