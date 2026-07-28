@@ -40,16 +40,17 @@ def main():
 
         # 2. Пересчитать статусы всех книг, у которых есть хотя бы один активный лот,
         #    но статус не IN_STOCK (из-за race condition)
-        books_with_active_listings = db.scalars(
+        # Загружаем все книги не в IN_STOCK и проверяем их лоты в памяти
+        books_not_in_stock = db.scalars(
             select(Book)
             .options(selectinload(Book.listings))
-            .join(Book.listings)
-            .where(
-                Book.status != BookStatus.IN_STOCK,
-                Book.listings.any(ListingStatus.ACTIVE),
-            )
-            .distinct()
+            .where(Book.status != BookStatus.IN_STOCK)
         ).all()
+
+        books_with_active_listings = [
+            book for book in books_not_in_stock
+            if any(l.status == ListingStatus.ACTIVE for l in book.listings)
+        ]
 
         print(f"\nНайдено {len(books_with_active_listings)} книг с активными лотами, но статус не IN_STOCK")
         for book in books_with_active_listings:
