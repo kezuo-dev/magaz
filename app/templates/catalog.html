@@ -60,9 +60,6 @@
     <option value="">Все площадки</option>
     <option value="ozon_only" {% if marketplace == 'ozon_only' %}selected{% endif %}>Только Ozon</option>
     <option value="wb_only" {% if marketplace == 'wb_only' %}selected{% endif %}>Только WB</option>
-    {% for mp in marketplaces %}
-    <option value="{{ mp.value }}" {% if marketplace == mp.value %}selected{% endif %}>На {{ marketplace_label(mp.value) }}</option>
-    {% endfor %}
   </select>
   <button type="submit" class="btn-search-submit">Искать</button>
 </form>
