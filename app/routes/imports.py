@@ -8,6 +8,8 @@
 """
 import csv
 import io
+import secrets
+import time
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
@@ -83,7 +85,17 @@ def _guess_marketplace(columns: list[str], filename: str) -> str | None:
 
 
 # Простое хранилище загруженного файла между шагом 1 и шагом 2 (по сессии).
-_uploads: dict[str, list[dict]] = {}
+# Ключ — случайный токен (secrets.token_urlsafe), чтобы избежать коллизий между
+# пользователями и предотвратить утечку данных. Записи старше 1 часа автоудаляются.
+_uploads: dict[str, tuple[list[dict], float]] = {}  # {token: (rows, timestamp)}
+
+
+def _cleanup_old_uploads():
+    """Удалить загрузки старше 1 часа, чтобы избежать утечки памяти."""
+    now = time.time()
+    expired = [token for token, (_, ts) in _uploads.items() if now - ts > 3600]
+    for token in expired:
+        _uploads.pop(token, None)
 
 
 def _parse_file(filename: str, raw: bytes) -> list[dict]:
@@ -260,8 +272,12 @@ async def import_upload(
     if not marketplace:
         marketplace = _guess_marketplace(columns, file.filename or "") or "ozon"
 
-    token = f"{marketplace}:{file.filename}"
-    _uploads[token] = rows
+    # Токен случайный, а не «площадка:имя файла»: одинаковое имя файла у двух
+    # пользователей раньше перетирало чужую загрузку. Заодно чистим старые записи,
+    # чтобы брошенные (не доведённые до шага 2) выгрузки не висели в памяти.
+    _cleanup_old_uploads()
+    token = secrets.token_urlsafe(16)
+    _uploads[token] = (rows, time.time())
     request.session["import_token"] = token
     request.session["import_marketplace"] = marketplace
 
@@ -296,8 +312,11 @@ async def import_run(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     token = request.session.get("import_token")
     marketplace = request.session.get("import_marketplace")
-    rows = _uploads.get(token)
-    if not rows:
+    # В _uploads лежит кортеж (строки, время загрузки) — распаковываем, иначе в
+    # импорт ушёл бы сам кортеж. Пустой токен или истёкшая запись → на шаг 1.
+    entry = _uploads.get(token) if token else None
+    rows = entry[0] if entry else None
+    if not rows or not marketplace:
         return RedirectResponse("/import", status_code=303)
 
     # mapping: поле_книги -> имя_колонки_в_файле
