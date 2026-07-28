@@ -1,4 +1,5 @@
 """Точка входа. FastAPI + сессии + вход по паролю + подключение роутов."""
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Form, Request
@@ -13,6 +14,13 @@ from app.security import check_password
 from app.tunnel import start_tunnel, stop_tunnel
 from app.templating import templates
 from app.routes import catalog, imports, log, settings as settings_routes
+
+# Настройка логирования: планировщик и фоновые задачи пишут в stdout, откуда
+# их забирает docker compose logs. Без этого логи планировщика терялись.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     %(name)s - %(message)s",
+)
 
 # Создаём таблицы при старте (для дев-режима на SQLite; на проде — alembic).
 Base.metadata.create_all(bind=engine)
