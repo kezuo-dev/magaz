@@ -273,8 +273,8 @@ class OzonClient(MarketplaceClient):
                 # fbo, проданная книга не показала бы 0 и не снялась бы с другой
                 # площадки. Когда типов нет вовсе — суммируем что дали.
                 entries = it.get("stocks") or []
-                fbs_entries = [st for st in entries if str(st.get("type") or "").lower() == "fbs"]
-                counted = fbs_entries or entries
+                fbs_entries = [st for st in entries if str(st.get("type") or "").strip().lower() == "fbs"]
+                counted = fbs_entries if fbs_entries else entries
                 present = sum(int(st.get("present") or 0) for st in counted)
                 reserved = sum(int(st.get("reserved") or 0) for st in counted)
                 result[str(offer_id)] = max(0, present - reserved)

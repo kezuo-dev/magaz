@@ -49,8 +49,9 @@ def refresh_book_status(db: Session, book: Book) -> str:
         return book.status
 
     # Заказ — доказательство продажи, независимо от того, кто её обнаружил.
+    # Но отменённые заказы не считаются: книга с отменённым заказом не продана.
     has_order = db.scalar(
-        select(Order.id).where(Order.book_id == book.id).limit(1)
+        select(Order.id).where(Order.book_id == book.id, Order.cancelled == False).limit(1)  # noqa: E712
     ) is not None
     book.status = BookStatus.SOLD if has_order else BookStatus.WITHDRAWN
     return book.status
@@ -189,9 +190,12 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
             continue
 
         # Ищем книгу по SKU (мы используем SKU как offer_id на площадке).
+        # Предзагружаем лоты, чтобы кросс-снятие видело все площадки.
         book = None
         if info.external_sku:
-            book = db.scalar(select(Book).where(Book.sku == info.external_sku))
+            book = db.scalar(
+                select(Book).options(selectinload(Book.listings)).where(Book.sku == info.external_sku)
+            )
 
         order = Order(
             marketplace=marketplace,
@@ -274,12 +278,14 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
                 continue
 
             book = order.book
-            # Восстанавливаем лот на площадке, где был заказ, в ACTIVE.
-            listing = next((l for l in book.listings if l.marketplace == marketplace), None)
-            if listing:
-                listing.status = ListingStatus.ACTIVE
-                listing.last_synced_at = utcnow()
-                listing.last_error = None
+            # Восстанавливаем ВСЕ снятые лоты книги в ACTIVE. Если заказ отменён, книга
+            # должна вернуться в продажу на всех площадках, где она была до продажи.
+            # Мы не храним историю снятий, поэтому восстанавливаем все WITHDRAWN-лоты.
+            for listing in book.listings:
+                if listing.status == ListingStatus.WITHDRAWN:
+                    listing.status = ListingStatus.ACTIVE
+                    listing.last_synced_at = utcnow()
+                    listing.last_error = None
 
             # Пересчитываем статус книги. Если есть хотя бы один активный лот (в том числе
             # только что восстановленный) — книга возвращается в продажу.
