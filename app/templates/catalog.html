@@ -310,11 +310,9 @@
           spin.hidden = true;
           renderRows(data.items);
           countEl.textContent = "Показано " + data.items.length + " из " + data.total + " книг";
-          // Скрываем пагинацию только если есть поисковый запрос или фильтры.
-          // Если всё очищено — показываем пагинацию обратно (если страниц > 1).
+          // Показываем пагинацию, если страниц больше одной (независимо от фильтров/поиска).
           if (pager) {
-            const hasQuery = input.value.trim() || statusSel.value || marketplaceSel.value;
-            pager.style.display = (hasQuery || data.pages <= 1) ? "none" : "";
+            pager.style.display = data.pages > 1 ? "" : "none";
           }
           body.classList.remove("fade-in"); void body.offsetWidth; body.classList.add("fade-in");
         })
