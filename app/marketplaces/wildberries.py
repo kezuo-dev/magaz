@@ -110,7 +110,7 @@ class WBClient(MarketplaceClient):
         )
 
     def withdraw(self, listing) -> None:
-        """Снять лот с продажи — обнуляем остаток на складе FBS.
+        """Снять лот с продажи — обнуляем остаток на складе FBS, затем удаляем карточку в корзину.
 
         ВАЖНО: остаток WB привязан к БАРКОДУ (skus[0]), а не к vendorCode. Баркод
         мы храним в listing.stock_key. Если по ошибке отправить vendorCode, WB не
@@ -124,7 +124,22 @@ class WBClient(MarketplaceClient):
                 "У лота Wildberries нет баркода (stock_key) — снять остаток нельзя. "
                 "Нужна сверка каталога, чтобы подтянуть баркод."
             )
+        # Шаг 1: обнуляем остаток
         self._set_stock(barcode, 0)
+
+        # Шаг 2: удаляем карточку в корзину (нужен vendorCode/nmID)
+        vendor_code = listing.external_id
+        if vendor_code:
+            try:
+                self._move_to_trash(vendor_code)
+            except MarketplaceError as exc:
+                # Не роняем всё снятие, если удаление в корзину не прошло —
+                # остаток уже обнулён, книга фактически снята с продажи.
+                # Логируем ошибку, но не пробрасываем её выше.
+                import logging
+                logging.getLogger("wildberries").warning(
+                    f"Не удалось переместить карточку {vendor_code} в корзину: {exc}"
+                )
 
     def _set_stock(self, sku: str, stock: int) -> None:
         # Без склада FBS остатки WB не принимает. Это не штатная ситуация при
@@ -137,6 +152,17 @@ class WBClient(MarketplaceClient):
             "PUT",
             f"{MARKETPLACE_URL}/api/v3/stocks/{self.warehouse_id}",
             {"stocks": [{"sku": sku, "amount": stock}]},
+        )
+
+    def _move_to_trash(self, vendor_code: str) -> None:
+        """Переместить карточку товара в корзину по vendorCode.
+
+        WB требует либо nmID (внутренний ID карточки), либо vendorCode (артикул
+        продавца). У нас в listing.external_id хранится vendorCode, используем его.
+        """
+        self._post(
+            f"{CONTENT_URL}/content/v2/cards/trash",
+            {"vendorCodes": [vendor_code]},
         )
 
     def fetch_stocks(self, keys: list[str]) -> dict[str, int]:
