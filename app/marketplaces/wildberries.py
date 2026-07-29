@@ -236,6 +236,8 @@ class WBClient(MarketplaceClient):
                 "У лота Wildberries нет баркода (stock_key) — остаток не выставить."
             )
         self._set_stock(barcode, 1)
+
+    def fetch_stocks(self, keys: list[str]) -> dict[str, int]:
         """Остатки FBS по баркодам (ключам остатка). Возвращает {баркод: остаток}.
 
         Тот же метод складов WB, но POST-запросом. WB принимает до 1000 sku за раз,
