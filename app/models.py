@@ -101,10 +101,21 @@ class Book(Base):
     listings: Mapped[list["Listing"]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
 
     @property
     def photo_list(self) -> list[str]:
         return [p.strip() for p in (self.photos or "").splitlines() if p.strip()]
+
+    @property
+    def sold_on(self) -> str | None:
+        """Площадка первого не-отменённого заказа (для подсказки к статусу «Продана»)."""
+        for order in (self.orders or []):
+            if not order.cancelled:
+                return order.marketplace
+        return None
 
 
 class Listing(Base):
@@ -147,7 +158,7 @@ class Order(Base):
     cancelled: Mapped[bool] = mapped_column(default=False, index=True)  # отменён ли заказ
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    book: Mapped["Book"] = relationship()
+    book: Mapped["Book"] = relationship(back_populates="orders")
 
 
 class SyncLog(Base):

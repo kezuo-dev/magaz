@@ -88,7 +88,7 @@
         </td>
         <td>
           <span class="badge badge-{{ book_status_css(book.status) }}"
-                title="{{ book_status_hint(book.status) }}">{{ book_status_label(book.status) }}</span>
+                title="{{ book_status_hint(book.status, book) }}">{{ book_status_label(book.status) }}</span>
         </td>
         <td class="mp-cells">
           {% for l in sort_listings(book.listings) if l.status == 'active' %}

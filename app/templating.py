@@ -48,7 +48,13 @@ def book_status_label(value: str) -> str:
     return BOOK_STATUS_LABELS.get(value, value)
 
 
-def book_status_hint(value: str) -> str:
+def book_status_hint(value: str, book=None) -> str:
+    """Подсказка к статусу. Для «Продана» добавляем площадку, если известна."""
+    if value == "sold" and book is not None:
+        mp = getattr(book, "sold_on", None)
+        if mp:
+            label = MARKETPLACE_LABELS.get(mp, mp)
+            return f"Продана на {label}"
     return BOOK_STATUS_HINTS.get(value, "")
 
 

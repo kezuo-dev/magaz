@@ -44,7 +44,7 @@ PAGE_SIZE = 50
 
 def _filtered_books_query(q: str, status: str, marketplace: str):
     """Собрать запрос списка книг по поиску/фильтрам (общий для страницы и API)."""
-    stmt = select(Book).options(selectinload(Book.listings))
+    stmt = select(Book).options(selectinload(Book.listings), selectinload(Book.orders))
     if q:
         # Экранируем подстановочные символы LIKE: без этого поиск «50%» или «A_B»
         # трактовал бы % и _ как шаблон и находил бы лишнее.
@@ -237,7 +237,7 @@ def api_books(
                 "price": f"{b.price:.0f} ₽" if b.price is not None else "—",
                 "status": b.status,
                 "status_label": book_status_label(b.status),
-                "status_hint": book_status_hint(b.status),
+                "status_hint": book_status_hint(b.status, b),
                 "status_css": book_status_css(b.status),
                 # Только активные лоты, в стабильном порядке (Ozon → WB): снятый лот
                 # в списке лишь путал бы («OZ снято» у книги, которой на Ozon нет).
