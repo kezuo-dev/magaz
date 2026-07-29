@@ -72,9 +72,10 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
         return {"checked": 0, "fixed": 0}
 
     # Находим книги, которые должны быть сняты (статус SOLD или WITHDRAWN), но у
-    # которых лот на этой площадке всё ещё ACTIVE. Это именно «не сняли»: либо
-    # API-вызов снятия не прошёл, либо кросс-снятие не отработало. Книги с лотом
-    # WITHDRAWN локально уже в порядке — нам нужны только те, где лот ACTIVE.
+    # которых есть лот на этой площадке — неважно, ACTIVE или WITHDRAWN локально.
+    # ACTIVE: кросс-снятие вообще не прошло — карточка точно висит.
+    # WITHDRAWN: сняли локально, но API мог не сработать — карточка могла остаться.
+    # В обоих случаях спрашиваем площадку через fetch_in_sale_ids и проверяем факт.
     books = db.scalars(
         select(Book)
         .options(selectinload(Book.listings))
@@ -82,7 +83,7 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
             Book.status.in_([BookStatus.SOLD, BookStatus.WITHDRAWN]),
             Book.listings.any(
                 (Listing.marketplace == marketplace)
-                & (Listing.status == ListingStatus.ACTIVE)
+                & (Listing.status.in_([ListingStatus.ACTIVE, ListingStatus.WITHDRAWN]))
             ),
         )
     ).all()
