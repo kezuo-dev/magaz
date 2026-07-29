@@ -167,7 +167,8 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
         if book:
             updated += 1
         else:
-            book = Book(sku=sku or f"AUTO-{isbn or title[:20]}")
+            auto_sku = sku or f"AUTO-{isbn or title[:20]}"
+            book = Book(sku=auto_sku)
             book.status = BookStatus.IN_STOCK
             db.add(book)
             created += 1
@@ -190,7 +191,28 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             except ValueError:
                 pass
 
-        db.flush()  # нужен book.id для лота
+        try:
+            db.flush()  # нужен book.id для лота
+        except Exception as exc:
+            # IntegrityError при дубле SKU (race condition с AUTO-{isbn}): откатываем
+            # добавление и ищем книгу заново. Если она появилась — используем её.
+            if "unique constraint" in str(exc).lower() or "duplicate" in str(exc).lower():
+                db.rollback()
+                if sku:
+                    book = db.scalar(select(Book).where(Book.sku == sku))
+                elif isbn:
+                    book = db.scalar(select(Book).where(Book.isbn == isbn))
+                if book:
+                    # Книга создана параллельным потоком — продолжаем с ней
+                    updated += 1
+                    created -= 1  # отменяем счётчик created
+                else:
+                    # Не удалось найти — пропускаем строку
+                    skipped += 1
+                    continue
+            else:
+                # Другая ошибка — пробрасываем выше
+                raise
 
         # Привязываем лот площадки, если его ещё нет.
         listing = next((l for l in book.listings if l.marketplace == marketplace), None)
@@ -415,9 +437,13 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
                       f"Снимаем только по явному нулю; пропавшие ключи оставлены полной сверке"))
 
     removed = 0
+    processed_books: set[int] = set()  # защита от дублей: одна книга снимается один раз
     for listing in keyed:
         book = listing.book
         if book is None:
+            continue
+        # Если книга уже обработана в этом проходе — пропускаем (защита от дублей stock_key)
+        if book.id in processed_books:
             continue
         amount = stocks.get(listing.stock_key)
         if amount is None:
@@ -431,6 +457,7 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
         else:
             continue
         _cross_withdraw(db, book, marketplace, listing)
+        processed_books.add(book.id)
         removed += 1
         _log(db, marketplace=marketplace, action="watch_removed", ok=True,
              message=f"Книга {book.sku}: {reason} на {marketplace}")

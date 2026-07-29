@@ -161,28 +161,45 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
             ),
         )
 
-        # Меняем статус лота обратно на ACTIVE, чтобы withdraw_book сработал
+        # Меняем статус лота обратно на ACTIVE, чтобы withdraw_book сработал.
+        # Сохраняем старые статусы для отката при ошибке.
+        old_listing_status = listing.status
+        old_book_status = book.status
         listing.status = ListingStatus.ACTIVE
         book.status = BookStatus.IN_STOCK
 
         # Повторное снятие с новой логикой (с архивацией для Ozon)
-        success = withdraw_book(db, book, marketplace)
-        if success:
-            fixed += 1
+        try:
+            success = withdraw_book(db, book, marketplace)
+            if success:
+                fixed += 1
+                _log(
+                    db,
+                    marketplace=marketplace,
+                    action="reconcile_withdrawn",
+                    ok=True,
+                    book_id=book.id,
+                    message=f"Книга {book.sku}: повторное снятие выполнено",
+                )
+            else:
+                # withdraw_book уже записал причину ошибки в журнал отдельной строкой
+                failed += 1
+
+            # Обновляем статус книги после повторного снятия
+            refresh_book_status(db, book)
+        except Exception as exc:
+            # Непредвиденная ошибка (не MarketplaceError) — откатываем статусы
+            listing.status = old_listing_status
+            book.status = old_book_status
+            failed += 1
             _log(
                 db,
                 marketplace=marketplace,
                 action="reconcile_withdrawn",
-                ok=True,
+                ok=False,
                 book_id=book.id,
-                message=f"Книга {book.sku}: повторное снятие выполнено",
+                message=f"Книга {book.sku}: сбой при снятии — {exc}",
             )
-        else:
-            # withdraw_book уже записал причину ошибки в журнал отдельной строкой
-            failed += 1
-
-        # Обновляем статус книги после повторного снятия
-        refresh_book_status(db, book)
 
     # Итог пишем ВСЕГДА, даже когда исправлять нечего: иначе после нажатия
     # «Проверить снятые» в журнале не остаётся никакого следа и непонятно,
