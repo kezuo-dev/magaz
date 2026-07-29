@@ -2,9 +2,9 @@
 # Python 3.13 (совместим с зависимостями; на VPS свежий Python не обязателен).
 FROM python:3.13-slim
 
-# Системные библиотеки для psycopg2 (PostgreSQL) и сборки колёс.
+# Системные библиотеки для psycopg2 (PostgreSQL), сборки колёс и шрифтов DejaVu.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 build-essential \
+    && apt-get install -y --no-install-recommends libpq5 build-essential fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

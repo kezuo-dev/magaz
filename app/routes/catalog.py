@@ -8,12 +8,13 @@
 import shutil
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.db import get_db
+from app.forbidden_check import check_catalog_for_forbidden
 from app.models import (
     Book,
     BookStatus,
@@ -23,6 +24,7 @@ from app.models import (
     Order,
     SyncLog,
 )
+from app.pdf_export import generate_forbidden_pdf
 from app.photos import UPLOAD_DIR
 from app.templating import (
     book_status_css,
@@ -292,3 +294,30 @@ def wipe_catalog(
         shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
 
     return RedirectResponse("/?wiped=1", status_code=303)
+
+
+@router.get("/catalog/check_forbidden", response_class=HTMLResponse)
+def check_forbidden(request: Request, db: Session = Depends(get_db)):
+    """Проверка каталога на запрещённые темы: экстремизм, терроризм, ЛГБТ и т.д.
+
+    Сканирует все книги в продаже на ключевые слова. Возвращает страницу со списком
+    найденных книг и кнопкой экспорта в PDF.
+    """
+    results = check_catalog_for_forbidden(db)
+    return templates.TemplateResponse(
+        request, "forbidden_results.html", {"results": results}
+    )
+
+
+@router.get("/catalog/forbidden/pdf")
+def download_forbidden_pdf(db: Session = Depends(get_db)):
+    """Скачать PDF-отчёт с найденными книгами (запрещённые темы)."""
+    results = check_catalog_for_forbidden(db)
+    pdf_bytes = generate_forbidden_pdf(results)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": "attachment; filename=forbidden_check.pdf"
+        },
+    )

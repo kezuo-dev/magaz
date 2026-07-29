@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Проверка запрещённых тем</h1>
+    <p class="page-sub muted">Найденные книги с потенциально проблемным содержанием</p>
+  </div>
+  <div class="head-actions">
+    {% if results %}
+    <a href="/catalog/forbidden/pdf" class="btn-primary" download>Скачать PDF</a>
+    {% endif %}
+    <a href="/" class="btn-secondary">Вернуться к каталогу</a>
+  </div>
+</div>
+
+{% if not results %}
+<div class="notice ok">
+  <span>✓ Проверка завершена. Проблемных книг не найдено.</span>
+</div>
+{% else %}
+<div class="notice warn">
+  <span>⚠️ Найдено {{ results|length }} книг с потенциально проблемным содержанием. Проверьте их вручную.</span>
+</div>
+
+<div class="table-wrap">
+  <table class="grid">
+    <colgroup>
+      <col style="width: 12%">
+      <col style="width: 38%">
+      <col style="width: 20%">
+      <col style="width: 15%">
+      <col style="width: 15%">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Артикул</th>
+        <th>Название</th>
+        <th>Автор</th>
+        <th>Категория</th>
+        <th>Найдено слово</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for match in results %}
+      <tr class="clickable" data-href="/books/{{ match.book_id }}">
+        <td>
+          <div class="sku-cell">
+            <span class="mono sku-text">{{ match.sku }}</span>
+            <button type="button" class="copy-btn" data-copy="{{ match.sku }}"
+                    title="Скопировать артикул" aria-label="Скопировать артикул">
+              <span class="copy-icon" aria-hidden="true">⧉</span>
+            </button>
+          </div>
+        </td>
+        <td class="col-title">
+          <a href="/books/{{ match.book_id }}">{{ match.title }}</a>
+        </td>
+        <td>{{ match.author or '—' }}</td>
+        <td><span class="badge badge-warn">{{ match.category }}</span></td>
+        <td><code>{{ match.matched_word }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="list-foot muted">Найдено {{ results|length }} книг</div>
+{% endif %}
+
+<script>
+  // Копирование артикула
+  document.addEventListener("click", function (e) {
+    const btn = e.target.closest(".copy-btn");
+    if (btn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = btn.dataset.copy;
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text)
+          .then(() => flashBtn(btn, true))
+          .catch(() => flashBtn(btn, false));
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        flashBtn(btn, ok);
+      }
+      return;
+    }
+    if (e.target.closest("a")) return;
+    const row = e.target.closest("tr.clickable");
+    if (row && row.dataset.href) location.href = row.dataset.href;
+  });
+
+  function flashBtn(btn, ok) {
+    btn.classList.add(ok ? "copied" : "copy-fail");
+    const icon = btn.querySelector(".copy-icon");
+    const prev = icon.textContent;
+    icon.textContent = ok ? "✓" : "✕";
+    setTimeout(function () {
+      btn.classList.remove("copied", "copy-fail");
+      icon.textContent = prev;
+    }, 1100);
+  }
+</script>
+{% endblock %}
