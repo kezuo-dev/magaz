@@ -25,17 +25,15 @@
 <div class="table-wrap">
   <table class="grid">
     <colgroup>
-      <col style="width: 12%">
-      <col style="width: 38%">
-      <col style="width: 20%">
       <col style="width: 15%">
+      <col style="width: 50%">
+      <col style="width: 20%">
       <col style="width: 15%">
     </colgroup>
     <thead>
       <tr>
         <th>Артикул</th>
         <th>Название</th>
-        <th>Автор</th>
         <th>Категория</th>
         <th>Найдено слово</th>
       </tr>
@@ -55,7 +53,6 @@
         <td class="col-title">
           <a href="/books/{{ match.book_id }}">{{ match.title }}</a>
         </td>
-        <td>{{ match.author or '—' }}</td>
         <td><span class="badge badge-warn">{{ match.category }}</span></td>
         <td><code>{{ match.matched_word }}</code></td>
       </tr>
