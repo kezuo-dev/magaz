@@ -43,8 +43,11 @@ docker compose --env-file .env.prod logs -f app
 После деплоя сними книгу заново, чтобы применить новую логику (архивация Ozon):
 
 ```bash
-docker compose --env-file .env.prod exec app python3 manual_withdraw.py непмекН-725 ozon
+docker compose --env-file .env.prod exec app python3 -m app.withdraw_cli непмекН-725 ozon
 ```
+
+(Модуль лежит в `app/withdraw_cli.py` — в образ копируется только пакет `app/`,
+поэтому скрипты из корня проекта внутри контейнера недоступны.)
 
 Это:
 1. Обнулит остаток на Ozon (уже 0, но безопасно повторить)
