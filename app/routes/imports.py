@@ -235,6 +235,9 @@ def _sources(db: Session) -> list[dict]:
     return out
 
 
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 МБ — достаточно для любой выгрузки Ozon/WB
+
+
 @router.post("/upload", response_class=HTMLResponse)
 async def import_upload(
     request: Request,
@@ -247,7 +250,15 @@ async def import_upload(
     Если удалось распознать SKU/название — импортируем сразу, без лишних шагов.
     Показываем экран сопоставления только когда автоопределение не справилось.
     """
-    raw = await file.read()
+    raw = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw) > MAX_UPLOAD_BYTES:
+        return templates.TemplateResponse(
+            request,
+            "import_start.html",
+            {"marketplaces": list(Marketplace), "sources": _sources(db),
+             "error": f"Файл слишком большой (максимум {MAX_UPLOAD_BYTES // 1024 // 1024} МБ)"},
+            status_code=413,
+        )
     try:
         rows = _parse_file(file.filename or "", raw)
     except Exception as exc:
