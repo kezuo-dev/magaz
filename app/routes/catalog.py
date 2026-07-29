@@ -328,23 +328,29 @@ def download_forbidden_pdf(db: Session = Depends(get_db)):
 def reconcile_withdrawn(db: Session = Depends(get_db)):
     """Кнопка «Проверить снятые»: принудительная сверка снятых/проданных книг.
 
-    Запрашивает реальные остатки через API и повторно снимает книги, которые
-    всё ещё продаются (остаток > 0), хотя помечены как withdrawn/sold.
+    Спрашивает площадку, какие карточки она всё ещё показывает «В продаже», и
+    повторно снимает те, что помечены у нас как withdrawn/sold. Остаток для этого
+    не подходит: у проданной книги он 0 даже при видимой карточке.
     """
     results = reconcile_all_marketplaces(db)
     db.commit()
-
-    if not results:
-        return RedirectResponse("/?synced=Проверка снятых книг: всё в порядке", status_code=303)
 
     parts = []
     for mp, res in results.items():
         checked = res.get("checked", 0)
         fixed = res.get("fixed", 0)
-        if fixed > 0:
-            parts.append(f"{mp}: проверено {checked}, исправлено {fixed}")
-        elif checked > 0:
-            parts.append(f"{mp}: проверено {checked}, всё в порядке")
+        failed = res.get("failed", 0)
+        if not checked:
+            continue
+        text = f"{mp}: проверено {checked}"
+        if fixed:
+            text += f", исправлено {fixed}"
+        if failed:
+            text += f", не удалось снять {failed}"
+        if not fixed and not failed:
+            text += ", всё в порядке"
+        parts.append(text)
 
     from urllib.parse import quote
-    return RedirectResponse("/?synced=" + quote("; ".join(parts) if parts else "Проверка снятых книг завершена"), status_code=303)
+    message = "; ".join(parts) if parts else "Проверка снятых книг: проверять нечего"
+    return RedirectResponse("/?synced=" + quote(message), status_code=303)

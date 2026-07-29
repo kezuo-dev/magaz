@@ -342,6 +342,31 @@ class OzonClient(MarketplaceClient):
                 result[str(offer_id)] = max(0, present - reserved)
         return result
 
+    def fetch_in_sale_ids(self, keys: list[str]) -> set[str]:
+        """Вернуть подмножество offer_id, которые Ozon всё ещё показывает «В продаже».
+
+        Используем /v4/product/info/stocks с visibility=IN_SALE: в ответ попадают
+        только карточки, реально видимые покупателям. Если offer_id в ответе нет —
+        карточка уже снята / заархивирована. Именно этой проверкой нужно пользоваться
+        для сверки снятых книг: у проданной книги остаток available=0 (reserved=present),
+        поэтому fetch_stocks всегда возвращает 0 даже для не заархивированных карточек.
+        """
+        result: set[str] = set()
+        if not keys:
+            return result
+        for i in range(0, len(keys), 1000):
+            batch = keys[i : i + 1000]
+            data = self._post(
+                "/v4/product/info/stocks",
+                {"filter": {"offer_id": batch, "visibility": "IN_SALE"}, "limit": 1000},
+            )
+            items = (data.get("result") or {}).get("items") or data.get("items") or []
+            for it in items:
+                offer_id = it.get("offer_id")
+                if offer_id:
+                    result.add(str(offer_id))
+        return result
+
     def fetch_orders(self) -> list[OrderInfo]:
         """Получить недавние отправления FBS. Каждый товар в заказе — проданная книга.
 

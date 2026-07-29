@@ -214,11 +214,10 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
         new_count += 1
 
         if book:
-            # Лот на площадке продажи снят в любом случае — он реально продан.
-            sold_listing = next((l for l in book.listings if l.marketplace == marketplace), None)
-            if sold_listing:
-                sold_listing.status = ListingStatus.WITHDRAWN
-                sold_listing.last_synced_at = utcnow()
+            # Снимаем с площадки продажи через полный API-путь — для Ozon это
+            # обнуляет остаток И архивирует карточку. Раньше статус ставился
+            # вручную без API, и карточка Ozon оставалась видна покупателям.
+            withdraw_book(db, book, marketplace)
             # Кросс-снятие с других площадок. Если рубильник выключен, снятие не
             # выполнится — тогда заказ НЕ помечаем processed, чтобы позже (после
             # включения автоснятия) продажу можно было отзеркалить.

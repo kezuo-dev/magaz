@@ -2,8 +2,15 @@
 
 Периодически проверяет книги, которые помечены как снятые/проданные, но могут
 всё ещё висеть на площадке из-за сбоя API или неполного снятия (например,
-обнулили остаток, но не заархивировали карточку Ozon). Запрашивает реальные
-остатки через fetch_stocks и повторно снимает, если книга всё ещё продаётся.
+обнулили остаток, но не заархивировали карточку Ozon).
+
+ВАЖНО про признак «книга ещё продаётся». Остаток для этого не годится: у
+проданной книги б/у Ozon резервирует единственный экземпляр под заказ
+(present=1, reserved=1), поэтому доступный остаток = 0 ещё до отгрузки — и
+незаархивированная карточка, видимая покупателям, выглядела бы «снятой».
+Поэтому сначала спрашиваем площадку, какие карточки она реально показывает
+«В продаже» (fetch_in_sale_ids), и лишь если площадка это не умеет —
+откатываемся на остатки.
 """
 from __future__ import annotations
 
@@ -47,13 +54,21 @@ def _get_active_client(db: Session, marketplace: str):
 def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
     """Сверить снятые книги с реальным состоянием на площадке.
 
-    Для книг со статусом SOLD или WITHDRAWN проверяем реальные остатки через API.
-    Если книга всё ещё продаётся (остаток > 0) — снимаем повторно и пишем в журнал.
+    Для книг со статусом SOLD или WITHDRAWN спрашиваем площадку, какие карточки
+    она всё ещё показывает «В продаже». Каждую найденную снимаем повторно (для
+    Ozon это ещё и архивация карточки) и пишем в журнал.
 
     Возвращает статистику: {"checked": N, "fixed": M}.
     """
     client = _get_active_client(db, marketplace)
     if client is None:
+        _log(
+            db,
+            marketplace=marketplace,
+            action="reconcile_withdrawn",
+            ok=True,
+            message="Сверка снятых книг пропущена: площадка выключена или нет ключей",
+        )
         return {"checked": 0, "fixed": 0}
 
     # Находим книги, которые должны быть сняты (статус SOLD или WITHDRAWN), но у
@@ -72,6 +87,13 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
     ).all()
 
     if not books:
+        _log(
+            db,
+            marketplace=marketplace,
+            action="reconcile_withdrawn",
+            ok=True,
+            message="Сверка снятых книг: снятых книг для проверки нет",
+        )
         return {"checked": 0, "fixed": 0}
 
     # Собираем ключи остатков (stock_key) для всех этих книг
@@ -84,30 +106,41 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
             book_by_key[listing.stock_key] = (book, listing)
 
     if not stock_keys:
+        _log(
+            db,
+            marketplace=marketplace,
+            action="reconcile_withdrawn",
+            ok=True,
+            message=f"Сверка снятых книг: у {len(books)} книг нет ключа остатка — проверить нечего",
+        )
         return {"checked": 0, "fixed": 0}
 
-    # Запрашиваем реальные остатки с площадки
+    # Спрашиваем площадку, какие карточки реально видны покупателям. Остаток тут
+    # не показатель: у проданной книги он 0 даже когда карточка не заархивирована.
+    checked = len(stock_keys)
     try:
-        stocks = client.fetch_stocks(stock_keys)
+        still_selling = client.fetch_in_sale_ids(stock_keys)
+        if still_selling is None:
+            # Площадка не умеет отдавать видимость — откатываемся на остатки.
+            stocks = client.fetch_stocks(stock_keys)
+            still_selling = {k for k, stock in stocks.items() if stock > 0}
+            method = "по остаткам"
+        else:
+            method = "по видимости карточек"
     except MarketplaceError as exc:
         _log(
             db,
             marketplace=marketplace,
             action="reconcile_withdrawn",
             ok=False,
-            message=f"Не удалось запросить остатки: {exc}",
+            message=f"Не удалось проверить состояние карточек: {exc}",
         )
         return {"checked": 0, "fixed": 0}
 
-    checked = len(stock_keys)
     fixed = 0
+    failed = 0
 
-    # Проверяем каждую книгу: если остаток > 0, значит книга всё ещё продаётся
-    for key, stock in stocks.items():
-        if stock <= 0:
-            continue  # всё в порядке, книга снята
-
-        # Книга всё ещё продаётся, хотя должна быть снята
+    for key in still_selling:
         book, listing = book_by_key.get(key, (None, None))
         if not book:
             continue
@@ -118,7 +151,10 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
             action="reconcile_withdrawn",
             ok=False,
             book_id=book.id,
-            message=f"Книга {book.sku}: помечена как снятая, но остаток на {marketplace} = {stock}. Снимаем повторно.",
+            message=(
+                f"Книга {book.sku}: помечена как снятая, но на {marketplace} всё ещё "
+                f"в продаже. Снимаем повторно."
+            ),
         )
 
         # Меняем статус лота обратно на ACTIVE, чтобы withdraw_book сработал
@@ -138,29 +174,32 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
                 message=f"Книга {book.sku}: повторное снятие выполнено",
             )
         else:
-            # withdraw_book уже записал ошибку в журнал
-            pass
+            # withdraw_book уже записал причину ошибки в журнал отдельной строкой
+            failed += 1
 
         # Обновляем статус книги после повторного снятия
         refresh_book_status(db, book)
 
-    if fixed > 0:
-        _log(
-            db,
-            marketplace=marketplace,
-            action="reconcile_withdrawn",
-            ok=True,
-            message=f"Сверка снятых книг: проверено {checked}, исправлено {fixed}",
-        )
+    # Итог пишем ВСЕГДА, даже когда исправлять нечего: иначе после нажатия
+    # «Проверить снятые» в журнале не остаётся никакого следа и непонятно,
+    # выполнилась ли проверка вообще.
+    summary = f"Сверка снятых книг ({method}): проверено {checked}, исправлено {fixed}"
+    if failed:
+        summary += f", не удалось снять {failed}"
+    _log(
+        db,
+        marketplace=marketplace,
+        action="reconcile_withdrawn",
+        ok=failed == 0,
+        message=summary,
+    )
 
-    return {"checked": checked, "fixed": fixed}
+    return {"checked": checked, "fixed": fixed, "failed": failed}
 
 
 def reconcile_all_marketplaces(db: Session) -> dict:
     """Сверить снятые книги на всех включённых площадках. Вызывается по расписанию."""
     results = {}
     for marketplace in ["ozon", "wildberries"]:
-        result = reconcile_withdrawn_books(db, marketplace)
-        if result["checked"] > 0 or result["fixed"] > 0:
-            results[marketplace] = result
+        results[marketplace] = reconcile_withdrawn_books(db, marketplace)
     return results
