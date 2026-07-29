@@ -7,9 +7,9 @@
   </div>
   <div class="head-actions">
     {% if results %}
-    <a href="/catalog/forbidden/pdf" class="btn-primary" download>Скачать PDF</a>
+    <button type="button" onclick="location.href='/catalog/forbidden/pdf'">Скачать PDF</button>
     {% endif %}
-    <a href="/" class="btn-secondary">Вернуться к каталогу</a>
+    <button type="button" class="secondary" onclick="location.href='/'">Вернуться к каталогу</button>
   </div>
 </div>
 
