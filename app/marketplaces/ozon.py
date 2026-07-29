@@ -115,11 +115,30 @@ class OzonClient(MarketplaceClient):
         self._post("/v3/product/list", {"filter": {}, "limit": 1})
 
     def withdraw(self, listing) -> None:
-        """Снять лот с продажи — обнуляем остаток по offer_id."""
+        """Снять лот с продажи — обнуляем остаток по offer_id, затем архивируем карточку.
+
+        Обнуление остатка НЕ убирает карточку из раздела «В продаже» на Ozon — она
+        продолжает висеть с остатком 0. Чтобы реально снять с продажи, нужен второй
+        шаг: архивация через /v1/product/archive. Если архивация не прошла — логируем
+        warning, но не роняем снятие (остаток уже обнулён, книга фактически не продаётся).
+        """
         offer_id = listing.external_id
         if not offer_id:
             raise MarketplaceError("У лота Ozon нет offer_id — нечего снимать")
+        # Шаг 1: обнуляем остаток
         self._set_stock(offer_id, 0)
+
+        # Шаг 2: архивируем карточку (убираем из раздела «В продаже»)
+        try:
+            self._archive_product(offer_id)
+        except MarketplaceError as exc:
+            # Не роняем всё снятие, если архивация не прошла — остаток уже обнулён,
+            # книга фактически не продаётся (покупатель не сможет заказать).
+            # Логируем ошибку, но не пробрасываем её выше.
+            import logging
+            logging.getLogger("ozon").warning(
+                f"Не удалось заархивировать карточку {offer_id}: {exc}"
+            )
 
     def _set_stock(self, offer_id: str, stock: int) -> None:
         """Выставить остаток на складе FBS.
@@ -164,6 +183,17 @@ class OzonClient(MarketplaceClient):
                 str(e.get("message") or e.get("code") or e) for e in errors
             ) or "Ozon не обновил остаток (причина не указана)"
             raise MarketplaceError(f"Ozon не обновил остаток по {offer_id}: {reason}")
+
+    def _archive_product(self, offer_id: str) -> None:
+        """Переместить карточку товара в архив по offer_id.
+
+        Обнуление остатка НЕ убирает карточку из раздела «В продаже» — она висит
+        с остатком 0. Архивация через /v1/product/archive реально скрывает её.
+        """
+        self._post(
+            "/v1/product/archive",
+            {"product_id": [offer_id]},
+        )
 
     def fetch_catalog(self) -> list[dict]:
         """Выгрузить все товары Ozon постранично (по last_id).

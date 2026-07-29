@@ -127,18 +127,18 @@ class WBClient(MarketplaceClient):
         # Шаг 1: обнуляем остаток
         self._set_stock(barcode, 0)
 
-        # Шаг 2: удаляем карточку в корзину (нужен vendorCode/nmID)
-        vendor_code = listing.external_id
-        if vendor_code:
+        # Шаг 2: удаляем карточку в корзину (нужен nmID или vendorCode)
+        external_id = listing.external_id
+        if external_id:
             try:
-                self._move_to_trash(vendor_code)
+                self._move_to_trash(external_id)
             except MarketplaceError as exc:
                 # Не роняем всё снятие, если удаление в корзину не прошло —
                 # остаток уже обнулён, книга фактически снята с продажи.
                 # Логируем ошибку, но не пробрасываем её выше.
                 import logging
                 logging.getLogger("wildberries").warning(
-                    f"Не удалось переместить карточку {vendor_code} в корзину: {exc}"
+                    f"Не удалось переместить карточку {external_id} в корзину: {exc}"
                 )
 
     def _set_stock(self, sku: str, stock: int) -> None:
@@ -154,15 +154,33 @@ class WBClient(MarketplaceClient):
             {"stocks": [{"sku": sku, "amount": stock}]},
         )
 
-    def _move_to_trash(self, vendor_code: str) -> None:
-        """Переместить карточку товара в корзину по vendorCode.
+    def _move_to_trash(self, external_id: str) -> None:
+        """Переместить карточку товара в корзину.
 
-        WB требует либо nmID (внутренний ID карточки), либо vendorCode (артикул
-        продавца). У нас в listing.external_id хранится vendorCode, используем его.
+        WB требует либо nmID (внутренний числовой ID карточки), либо vendorCode
+        (артикул продавца). В listing.external_id теперь хранится nmID (после
+        обновления сверки каталога), но старые записи могут содержать vendorCode.
+        Пробуем сначала как nmID, затем как vendorCode.
         """
+        # Попытка 1: external_id как nmID (число). У свежих записей это nmID.
+        try:
+            nm_id = int(external_id)
+            self._post(
+                f"{CONTENT_URL}/content/v2/cards/trash",
+                {"nmIDs": [nm_id]},
+            )
+            return
+        except (ValueError, TypeError):
+            # external_id не число — пробуем как vendorCode (старые записи).
+            pass
+        except MarketplaceError:
+            # Запрос с nmID провалился — пробуем vendorCode как fallback.
+            pass
+
+        # Попытка 2: как vendorCode (для старых записей без nmID).
         self._post(
             f"{CONTENT_URL}/content/v2/cards/trash",
-            {"vendorCodes": [vendor_code]},
+            {"vendorCodes": [external_id]},
         )
 
     def fetch_stocks(self, keys: list[str]) -> dict[str, int]:
@@ -221,10 +239,15 @@ class WBClient(MarketplaceClient):
                     skus = sizes[0].get("skus") or []
                     barcode = skus[0] if skus else None
                     price = sizes[0].get("price")
+
+                # nmID — внутренний ID карточки WB, нужен для удаления в корзину.
+                # Сохраняем его в external_id вместо vendorCode: при удалении API
+                # требует именно nmID. vendorCode остаётся в sku (он и есть наш SKU).
+                nm_id = card.get("nmID")
                 rows.append(
                     {
                         "sku": card.get("vendorCode"),
-                        "external_id": card.get("vendorCode"),
+                        "external_id": str(nm_id) if nm_id else card.get("vendorCode"),
                         # Остаток WB читается по баркоду (skus[0]), а не по vendorCode —
                         # храним его как ключ остатка для слежения.
                         "stock_key": barcode,
