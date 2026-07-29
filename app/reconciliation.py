@@ -14,11 +14,12 @@
 """
 from __future__ import annotations
 
+from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.marketplaces import MarketplaceError, get_client, is_supported
-from app.models import Book, BookStatus, Listing, ListingStatus, MarketplaceAccount, SyncLog
+from app.models import Book, BookStatus, Listing, ListingStatus, MarketplaceAccount, SyncLog, utcnow
 from app.security import decrypt_credentials
 from app.sync import refresh_book_status, withdraw_book
 
@@ -73,14 +74,15 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
 
     # Находим книги, которые должны быть сняты (статус SOLD или WITHDRAWN), но у
     # которых есть лот на этой площадке — неважно, ACTIVE или WITHDRAWN локально.
-    # ACTIVE: кросс-снятие вообще не прошло — карточка точно висит.
-    # WITHDRAWN: сняли локально, но API мог не сработать — карточка могла остаться.
-    # В обоих случаях спрашиваем площадку через fetch_in_sale_ids и проверяем факт.
+    # Ограничиваем 30 днями: очень старые снятые книги заведомо сняты с площадок,
+    # и тянуть их тысячами в API нет смысла — только тормозим и засоряем журнал.
+    cutoff = utcnow() - timedelta(days=30)
     books = db.scalars(
         select(Book)
         .options(selectinload(Book.listings))
         .where(
             Book.status.in_([BookStatus.SOLD, BookStatus.WITHDRAWN]),
+            Book.updated_at >= cutoff,
             Book.listings.any(
                 (Listing.marketplace == marketplace)
                 & (Listing.status.in_([ListingStatus.ACTIVE, ListingStatus.WITHDRAWN]))

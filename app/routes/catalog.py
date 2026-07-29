@@ -326,31 +326,25 @@ def download_forbidden_pdf(db: Session = Depends(get_db)):
 
 @router.post("/catalog/reconcile")
 def reconcile_withdrawn(db: Session = Depends(get_db)):
-    """Кнопка «Проверить снятые»: принудительная сверка снятых/проданных книг.
+    """Кнопка «Проверить снятые»: запускает сверку в фоне и сразу редиректит.
 
-    Спрашивает площадку, какие карточки она всё ещё показывает «В продаже», и
-    повторно снимает те, что помечены у нас как withdrawn/sold. Остаток для этого
-    не подходит: у проданной книги он 0 даже при видимой карточке.
+    Сверка может занять десятки секунд (много книг → много API-запросов),
+    поэтому не ждём результата — запускаем в отдельном потоке. Результат
+    появится в журнале.
     """
-    results = reconcile_all_marketplaces(db)
-    db.commit()
+    import threading
+    from app.db import SessionLocal
 
-    parts = []
-    for mp, res in results.items():
-        checked = res.get("checked", 0)
-        fixed = res.get("fixed", 0)
-        failed = res.get("failed", 0)
-        if not checked:
-            continue
-        text = f"{mp}: проверено {checked}"
-        if fixed:
-            text += f", исправлено {fixed}"
-        if failed:
-            text += f", не удалось снять {failed}"
-        if not fixed and not failed:
-            text += ", всё в порядке"
-        parts.append(text)
+    def _run():
+        bg_db = SessionLocal()
+        try:
+            reconcile_all_marketplaces(bg_db)
+            bg_db.commit()
+        except Exception:
+            bg_db.rollback()
+        finally:
+            bg_db.close()
 
+    threading.Thread(target=_run, daemon=True).start()
     from urllib.parse import quote
-    message = "; ".join(parts) if parts else "Проверка снятых книг: проверять нечего"
-    return RedirectResponse("/?synced=" + quote(message), status_code=303)
+    return RedirectResponse("/?synced=" + quote("Проверка снятых запущена — результат появится в журнале"), status_code=303)
