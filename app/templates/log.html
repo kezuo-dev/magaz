@@ -2,17 +2,23 @@
 {% block content %}
 <div class="page-head"><h1>Журнал синхронизации</h1></div>
 
-<form method="get" action="/log" class="filters">
-  <select name="marketplace" onchange="this.form.submit()">
+<form method="get" action="/log" class="toolbar" id="filter-form" autocomplete="off">
+  <div class="search-field">
+    <span class="search-icon">🔍</span>
+    <input type="text" name="q" id="search-input" value="{{ q }}" placeholder="Поиск по сообщению или артикулу">
+    <span class="search-spin" id="search-spin" hidden></span>
+  </div>
+  <select name="marketplace" id="filter-marketplace">
     <option value="">Все площадки</option>
     {% for m in marketplaces %}
     <option value="{{ m.value }}" {{ 'selected' if marketplace == m.value else '' }}>{{ marketplace_label(m.value) }}</option>
     {% endfor %}
   </select>
   <label class="checkbox">
-    <input type="checkbox" name="only_errors" value="1" {{ 'checked' if only_errors else '' }} onchange="this.form.submit()">
+    <input type="checkbox" name="only_errors" id="filter-errors" value="1" {{ 'checked' if only_errors else '' }}>
     Только ошибки
   </label>
+  <button type="submit" class="btn-search-submit">Искать</button>
 </form>
 
 {% if not entries %}
@@ -30,7 +36,7 @@
       <th>Сообщение</th>
     </tr>
   </thead>
-  <tbody>
+  <tbody id="log-body">
     {% for e in entries %}
     <tr class="{{ 'row-error' if not e.ok else '' }}">
       <td class="nowrap">{{ e.created_at.strftime('%d.%m %H:%M:%S') }}</td>
@@ -43,5 +49,73 @@
   </tbody>
 </table>
 </div>
+
+<div class="list-foot muted"><span id="list-count">Показано {{ entries|length }} записей</span></div>
 {% endif %}
+
+<script>
+  // Живой поиск по журналу
+  (function () {
+    const input = document.getElementById("search-input");
+    const marketplaceSel = document.getElementById("filter-marketplace");
+    const errorsCheck = document.getElementById("filter-errors");
+    const body = document.getElementById("log-body");
+    const countEl = document.getElementById("list-count");
+    const spin = document.getElementById("search-spin");
+    let timer = null, seq = 0;
+
+    if (!input || !body) return; // журнал может быть пуст
+
+    function esc(s) {
+      return (s == null ? "" : String(s)).replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    function renderRows(items) {
+      if (!items.length) {
+        body.innerHTML = '<tr><td colspan="5" class="empty">Ничего не найдено. Измените запрос или фильтр.</td></tr>';
+        return;
+      }
+      body.innerHTML = items.map(function (e) {
+        const rowClass = e.ok ? '' : 'row-error';
+        const badge = e.ok
+          ? '<span class="badge badge-in_stock">ОК</span>'
+          : '<span class="badge badge-error">Ошибка</span>';
+        return '<tr class="' + rowClass + '">' +
+          '<td class="nowrap">' + esc(e.created_at) + '</td>' +
+          '<td>' + esc(e.marketplace || '—') + '</td>' +
+          '<td>' + esc(e.action) + '</td>' +
+          '<td>' + badge + '</td>' +
+          '<td>' + esc(e.message || '') + '</td></tr>';
+      }).join("");
+    }
+
+    function run() {
+      const mySeq = ++seq;
+      spin.hidden = false;
+      const params = new URLSearchParams({
+        q: input.value,
+        marketplace: marketplaceSel.value,
+        only_errors: errorsCheck.checked ? '1' : ''
+      });
+      fetch("/api/log?" + params.toString())
+        .then(r => r.json())
+        .then(function (data) {
+          if (mySeq !== seq) return;
+          spin.hidden = true;
+          renderRows(data.items);
+          countEl.textContent = "Показано " + data.items.length + " записей";
+          body.classList.remove("fade-in"); void body.offsetWidth; body.classList.add("fade-in");
+        })
+        .catch(function () { spin.hidden = true; });
+    }
+
+    function schedule() { clearTimeout(timer); timer = setTimeout(run, 220); }
+
+    input.addEventListener("input", schedule);
+    marketplaceSel.addEventListener("change", run);
+    errorsCheck.addEventListener("change", run);
+    document.getElementById("filter-form").addEventListener("submit", function (e) { e.preventDefault(); run(); });
+  })();
+</script>
 {% endblock %}
