@@ -64,6 +64,7 @@ def generate_forbidden_pdf(results: list[ForbiddenMatch]) -> bytes:
     # Заголовок
     story.append(Paragraph("Проверка запрещённых тем", title_style))
     story.append(Paragraph(f"Найдено книг: {len(results)}", normal_style))
+    story.append(Paragraph("Проверьте найденные книги вручную перед снятием с продажи.", normal_style))
     story.append(Spacer(1, 0.5 * cm))
 
     if not results:
