@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Журнал по книгам</h1>
+    <p class="page-sub muted">Записи сгруппированы по артикулам</p>
+  </div>
+  <div class="head-actions">
+    <a href="/log" class="btn secondary">Обычный журнал</a>
+  </div>
+</div>
+
+<form method="get" action="/log/by-book" class="toolbar" id="filter-form" autocomplete="off">
+  <div class="search-field">
+    <span class="search-icon">🔍</span>
+    <input type="text" name="q" id="search-input" value="{{ q }}" placeholder="Поиск по артикулу">
+    <span class="search-spin" id="search-spin" hidden></span>
+  </div>
+  <select name="marketplace" id="filter-marketplace">
+    <option value="">Все площадки</option>
+    {% for m in marketplaces %}
+    <option value="{{ m.value }}" {{ 'selected' if marketplace == m.value else '' }}>{{ marketplace_label(m.value) }}</option>
+    {% endfor %}
+  </select>
+  <label class="checkbox">
+    <input type="checkbox" name="only_errors" id="filter-errors" value="1" {{ 'checked' if only_errors else '' }}>
+    Только ошибки
+  </label>
+  <button type="submit" class="btn-search-submit">Искать</button>
+</form>
+
+{% if not groups %}
+  <p class="muted">Записей пока нет.</p>
+{% else %}
+<div class="log-groups">
+  {% for group in groups %}
+  <div class="log-group">
+    <div class="log-group-header">
+      <div class="log-book-info">
+        <span class="mono">{{ group.sku }}</span>
+        {% if group.title %}
+        <span class="log-book-title">{{ group.title }}</span>
+        {% endif %}
+      </div>
+      <span class="log-group-count muted">{{ group.entries|length }} записей</span>
+    </div>
+    <table class="grid log-group-table">
+      <thead>
+        <tr>
+          <th style="width: 15%">Время</th>
+          <th style="width: 15%">Площадка</th>
+          <th style="width: 15%">Действие</th>
+          <th style="width: 10%">Итог</th>
+          <th style="width: 45%">Сообщение</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in group.entries %}
+        <tr class="{{ 'row-error' if not e.ok else '' }}">
+          <td class="nowrap">{{ e.created_at.strftime('%d.%m %H:%M:%S') }}</td>
+          <td>{{ marketplace_label(e.marketplace) if e.marketplace else '—' }}</td>
+          <td>{{ e.action }}</td>
+          <td>{% if e.ok %}<span class="badge badge-in_stock">ОК</span>{% else %}<span class="badge badge-error">Ошибка</span>{% endif %}</td>
+          <td>{{ e.message or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="list-foot muted">Показано {{ groups|length }} книг</div>
+{% endif %}
+
+<style>
+.log-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.log-group {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.log-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.log-book-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.log-book-title {
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.log-group-count {
+  font-size: 13px;
+}
+.log-group-table {
+  margin: 0;
+  border: none;
+  box-shadow: none;
+}
+.log-group-table thead th {
+  background: var(--surface-2);
+}
+</style>
+{% endblock %}

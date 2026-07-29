@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Журнал синхронизации</h1></div>
+<div class="page-head">
+  <div>
+    <h1>Журнал синхронизации</h1>
+  </div>
+  <div class="head-actions">
+    <a href="/log/by-book" class="btn secondary">По книгам</a>
+  </div>
+</div>
 
 <form method="get" action="/log" class="toolbar" id="filter-form" autocomplete="off">
   <div class="search-field">
