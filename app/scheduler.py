@@ -20,6 +20,7 @@ from app.catalog_sync import sync_all, watch_all_stocks
 from app.config import settings
 from app.db import SessionLocal
 from app.models import MarketplaceAccount
+from app.reconciliation import reconcile_all_marketplaces
 from app.sync import poll_marketplace_orders, process_cancelled_orders
 
 logger = logging.getLogger("scheduler")
@@ -102,6 +103,25 @@ def sync_all_catalogs() -> None:
         db.close()
 
 
+def reconcile_all_withdrawn() -> None:
+    """Один проход сверки снятых книг с реальным состоянием на площадках.
+
+    Проверяет книги, помеченные как снятые/проданные, но всё ещё висящие на
+    площадке (остаток > 0). Повторно снимает такие книги. Идёт каждые 10 минут.
+    """
+    db = SessionLocal()
+    try:
+        results = reconcile_all_marketplaces(db)
+        db.commit()
+        if results:
+            logger.info("Сверка снятых книг: %s", results)
+    except Exception:  # noqa: BLE001 — сбой сверки не должен ронять планировщик
+        db.rollback()
+        logger.exception("Сбой сверки снятых книг")
+    finally:
+        db.close()
+
+
 def start_scheduler() -> None:
     global _scheduler
     if not settings.scheduler_enabled or _scheduler is not None:
@@ -139,9 +159,17 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    _scheduler.add_job(
+        reconcile_all_withdrawn,
+        trigger="interval",
+        minutes=10,  # каждые 10 минут проверяем снятые книги
+        id="reconcile_withdrawn",
+        max_instances=1,
+        coalesce=True,
+    )
     _scheduler.start()
     logger.info(
-        "Планировщик запущен: заказы %s мин, остатки %s мин, сверка каталога %s мин",
+        "Планировщик запущен: заказы %s мин, остатки %s мин, сверка каталога %s мин, сверка снятых 10 мин",
         settings.poll_interval_minutes,
         settings.stock_watch_interval_minutes,
         settings.catalog_sync_interval_minutes,
