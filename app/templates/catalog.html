@@ -8,6 +8,7 @@
   <div class="head-actions">
     <button type="button" id="sync-btn">Обновить каталог</button>
     <button type="button" id="check-forbidden-btn">Проверить запрещённые темы</button>
+    <button type="button" id="reconcile-btn" class="secondary">Проверить снятые</button>
     <button type="button" class="ghost-danger" id="wipe-open">Очистить</button>
   </div>
 </div>
@@ -162,6 +163,22 @@
   </div>
 </div>
 
+<!-- Модалка подтверждения проверки снятых -->
+<div class="modal-overlay" id="reconcile-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reconcile-title">
+    <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
+    <div class="modal-icon">🔍</div>
+    <h2 id="reconcile-title">Проверить снятые книги?</h2>
+    <p class="muted">Программа проверит реальные остатки снятых и проданных книг на площадках через API. Если книга всё ещё продаётся — повторно снимет её.</p>
+    <form method="post" action="/catalog/reconcile" class="modal-form js-loading-form">
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-close>Отмена</button>
+        <button type="submit" data-loading-text="Проверяем…">Проверить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
   // ---- Закрытие уведомлений крестиком (с плавным исчезновением) ----
   document.querySelectorAll(".notice-close").forEach(function (btn) {
@@ -185,6 +202,7 @@
   document.getElementById("wipe-open").addEventListener("click", () => openModal("wipe-modal"));
   document.getElementById("sync-btn").addEventListener("click", () => openModal("sync-modal"));
   document.getElementById("check-forbidden-btn").addEventListener("click", () => location.href = "/catalog/check_forbidden");
+  document.getElementById("reconcile-btn").addEventListener("click", () => openModal("reconcile-modal"));
   document.querySelectorAll(".modal-overlay").forEach(function (ov) {
     ov.addEventListener("click", function (e) {
       if (e.target === ov || e.target.hasAttribute("data-close")) closeModal(ov);

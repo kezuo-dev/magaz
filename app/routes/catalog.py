@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.pdf_export import generate_forbidden_pdf
 from app.photos import UPLOAD_DIR
+from app.reconciliation import reconcile_all_marketplaces
 from app.templating import (
     book_status_css,
     book_status_hint,
@@ -321,3 +322,29 @@ def download_forbidden_pdf(db: Session = Depends(get_db)):
             "Content-Disposition": "attachment; filename=forbidden_check.pdf"
         },
     )
+
+
+@router.post("/catalog/reconcile")
+def reconcile_withdrawn(db: Session = Depends(get_db)):
+    """Кнопка «Проверить снятые»: принудительная сверка снятых/проданных книг.
+
+    Запрашивает реальные остатки через API и повторно снимает книги, которые
+    всё ещё продаются (остаток > 0), хотя помечены как withdrawn/sold.
+    """
+    results = reconcile_all_marketplaces(db)
+    db.commit()
+
+    if not results:
+        return RedirectResponse("/?synced=Проверка снятых книг: всё в порядке", status_code=303)
+
+    parts = []
+    for mp, res in results.items():
+        checked = res.get("checked", 0)
+        fixed = res.get("fixed", 0)
+        if fixed > 0:
+            parts.append(f"{mp}: проверено {checked}, исправлено {fixed}")
+        elif checked > 0:
+            parts.append(f"{mp}: проверено {checked}, всё в порядке")
+
+    from urllib.parse import quote
+    return RedirectResponse("/?synced=" + quote("; ".join(parts) if parts else "Проверка снятых книг завершена"), status_code=303)
