@@ -71,20 +71,22 @@ def generate_forbidden_pdf(results: list[ForbiddenMatch]) -> bytes:
         story.append(Paragraph("Проблемных книг не найдено.", normal_style))
     else:
         # Таблица с результатами (без колонки «Автор»)
+        # Название оборачиваем в Paragraph, чтобы длинный текст переносился на
+        # несколько строк внутри ячейки, а не вылезал за границы таблицы.
         table_data = [["Артикул", "Название", "Категория", "Слово"]]
         for match in results:
             table_data.append(
                 [
-                    match.sku,
-                    match.title[:80] + ("…" if len(match.title) > 80 else ""),
-                    match.category,
-                    match.matched_word,
+                    Paragraph(match.sku, normal_style),
+                    Paragraph(match.title, normal_style),
+                    Paragraph(match.category, normal_style),
+                    Paragraph(match.matched_word, normal_style),
                 ]
             )
 
         table = Table(
             table_data,
-            colWidths=[3.5 * cm, 10 * cm, 4 * cm, 2.5 * cm],
+            colWidths=[3 * cm, 10.5 * cm, 4 * cm, 2.5 * cm],
             repeatRows=1,
         )
         table.setStyle(
