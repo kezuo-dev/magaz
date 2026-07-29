@@ -39,6 +39,11 @@ class MarketplaceClient:
 
     def __init__(self, credentials: dict):
         self.credentials = credentials or {}
+        # Предупреждение о частичном успехе последней операции: снятие удалось
+        # (товар не продаётся), но второй шаг не прошёл — например, карточку Ozon
+        # не удалось заархивировать. Такое нельзя бросать исключением (снятие-то
+        # состоялось), но и терять нельзя: вызывающий код пишет это в журнал.
+        self.last_warning: str | None = None
 
     def withdraw(self, listing) -> None:
         """Снять лот с продажи. listing — ORM-объект Listing с external_id."""

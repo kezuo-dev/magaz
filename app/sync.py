@@ -109,8 +109,14 @@ def withdraw_book(db: Session, book: Book, marketplace: str) -> bool:
         listing.status = ListingStatus.WITHDRAWN
         listing.last_error = None
         listing.last_synced_at = utcnow()
+        msg = f"Снято с {marketplace}"
+        # Если есть предупреждение о частичном успехе (например, карточка Ozon не
+        # заархивирована) — добавляем его в журнал. Снятие считается успешным
+        # (остаток обнулён, книга не продаётся), но warning видно в логах.
+        if client.last_warning:
+            msg += f". {client.last_warning}"
         _log(db, marketplace=marketplace, action="withdraw", ok=True, book_id=book.id,
-             message=f"Снято с {marketplace}")
+             message=msg)
         return True
     except MarketplaceError as exc:
         listing.status = ListingStatus.ERROR
