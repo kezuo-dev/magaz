@@ -283,17 +283,34 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
                 continue
 
             book = order.book
-            # Восстанавливаем ВСЕ снятые лоты книги в ACTIVE. Если заказ отменён, книга
-            # должна вернуться в продажу на всех площадках, где она была до продажи.
-            # Мы не храним историю снятий, поэтому восстанавливаем все WITHDRAWN-лоты.
+            # Восстанавливаем лоты книги в ACTIVE и вызываем API площадки, чтобы
+            # реально вернуть карточку в продажу (разархивировать Ozon / вытащить
+            # WB из корзины + выставить остаток 1). Без API-вызова статус менялся
+            # только локально, а на площадке карточка оставалась снятой.
             for listing in book.listings:
-                if listing.status == ListingStatus.WITHDRAWN:
-                    listing.status = ListingStatus.ACTIVE
-                    listing.last_synced_at = utcnow()
-                    listing.last_error = None
+                if listing.status != ListingStatus.WITHDRAWN:
+                    continue
+                listing.status = ListingStatus.ACTIVE
+                listing.last_synced_at = utcnow()
+                listing.last_error = None
+                # Пробуем восстановить через API
+                client = _get_active_client(db, listing.marketplace)
+                if client is not None:
+                    try:
+                        client.restore(listing)
+                        msg = f"Заказ {order_id} отменён: карточка {book.sku} восстановлена на {listing.marketplace}"
+                        if client.last_warning:
+                            msg += f". {client.last_warning}"
+                        _log(db, marketplace=listing.marketplace, action="order_cancelled",
+                             ok=True, book_id=book.id, message=msg)
+                    except MarketplaceError as exc:
+                        listing.last_error = str(exc)
+                        _log(db, marketplace=listing.marketplace, action="order_cancelled",
+                             ok=False, book_id=book.id,
+                             message=f"Заказ {order_id} отменён, но вернуть карточку {book.sku} на {listing.marketplace} не удалось: {exc}")
 
-            # Пересчитываем статус книги. Если есть хотя бы один активный лот (в том числе
-            # только что восстановленный) — книга возвращается в продажу.
+            # Пересчитываем статус книги. Если есть хотя бы один активный лот —
+            # книга возвращается в продажу.
             refresh_book_status(db, book)
 
             order.cancelled = True

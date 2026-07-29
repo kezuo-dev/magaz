@@ -49,6 +49,15 @@ class MarketplaceClient:
         """Снять лот с продажи. listing — ORM-объект Listing с external_id."""
         raise NotImplementedError
 
+    def restore(self, listing) -> None:
+        """Вернуть лот в продажу после отмены заказа.
+
+        По умолчанию не реализовано — площадка не поддерживает восстановление.
+        Не бросает исключения: если метод не реализован, восстановление молча
+        пропускается (статус в БД всё равно обновится).
+        """
+        pass
+
     def fetch_orders(self) -> list[OrderInfo]:
         """Вернуть недавние заказы площадки. Дедупликацию делает вызывающий код."""
         raise NotImplementedError

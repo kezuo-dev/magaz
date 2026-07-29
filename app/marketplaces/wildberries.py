@@ -183,7 +183,59 @@ class WBClient(MarketplaceClient):
             {"vendorCodes": [external_id]},
         )
 
-    def fetch_stocks(self, keys: list[str]) -> dict[str, int]:
+    def _restore_from_trash(self, external_id: str) -> None:
+        """Восстановить карточку из корзины WB.
+
+        WB принимает nmID или vendorCode — та же логика, что у _move_to_trash.
+        Эндпоинт /content/v2/cards/recover (противоположность /cards/trash).
+        """
+        try:
+            nm_id = int(external_id)
+            self._post(
+                f"{CONTENT_URL}/content/v2/cards/recover",
+                {"nmIDs": [nm_id]},
+            )
+            return
+        except (ValueError, TypeError):
+            pass
+        except MarketplaceError:
+            pass
+
+        self._post(
+            f"{CONTENT_URL}/content/v2/cards/recover",
+            {"vendorCodes": [external_id]},
+        )
+
+    def restore(self, listing) -> None:
+        """Вернуть карточку WB в продажу после отмены заказа.
+
+        Шаг 1 — восстановить из корзины через /content/v2/cards/recover.
+        Шаг 2 — выставить остаток 1 по баркоду (stock_key).
+        Если восстановление из корзины не прошло — предупреждение, остаток
+        всё равно выставляем.
+        """
+        self.last_warning = None
+        external_id = listing.external_id
+        barcode = getattr(listing, "stock_key", None)
+
+        # Шаг 1: восстанавливаем из корзины
+        if external_id:
+            try:
+                self._restore_from_trash(external_id)
+            except MarketplaceError as exc:
+                self.last_warning = (
+                    f"Не удалось восстановить карточку {external_id} из корзины: {exc}. "
+                    "Остаток выставлен, карточка может остаться в корзине."
+                )
+                import logging
+                logging.getLogger("wildberries").warning(self.last_warning)
+
+        # Шаг 2: выставляем остаток 1
+        if not barcode:
+            raise MarketplaceError(
+                "У лота Wildberries нет баркода (stock_key) — остаток не выставить."
+            )
+        self._set_stock(barcode, 1)
         """Остатки FBS по баркодам (ключам остатка). Возвращает {баркод: остаток}.
 
         Тот же метод складов WB, но POST-запросом. WB принимает до 1000 sku за раз,

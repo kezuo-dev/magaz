@@ -227,6 +227,39 @@ class OzonClient(MarketplaceClient):
             {"product_id": [product_id]},
         )
 
+    def _unarchive_product(self, offer_id: str) -> None:
+        """Разархивировать карточку — вернуть из архива в «Готов к продаже»."""
+        product_id = self._resolve_product_id(offer_id)
+        self._post(
+            "/v1/product/unarchive",
+            {"product_id": [product_id]},
+        )
+
+    def restore(self, listing) -> None:
+        """Вернуть карточку Ozon в продажу после отмены заказа.
+
+        Шаг 1 — разархивировать (карточка уходит в «Готов к продаже»).
+        Шаг 2 — выставить остаток 1 (книга снова продаётся).
+        Если разархивация не прошла — предупреждение, но остаток всё равно
+        выставляем: Ozon может и сам разархивировать при ненулевом остатке.
+        """
+        offer_id = listing.external_id
+        if not offer_id:
+            raise MarketplaceError("У лота Ozon нет offer_id — нечего восстанавливать")
+        self.last_warning = None
+        # Шаг 1: разархивируем карточку
+        try:
+            self._unarchive_product(offer_id)
+        except MarketplaceError as exc:
+            self.last_warning = (
+                f"Не удалось разархивировать карточку {offer_id}: {exc}. "
+                "Остаток выставлен, но карточка может остаться в архиве."
+            )
+            import logging
+            logging.getLogger("ozon").warning(self.last_warning)
+        # Шаг 2: выставляем остаток 1
+        self._set_stock(offer_id, 1)
+
     def fetch_catalog(self) -> list[dict]:
         """Выгрузить все товары Ozon постранично (по last_id).
 
