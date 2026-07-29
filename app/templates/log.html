@@ -98,7 +98,7 @@
         marketplace: marketplaceSel.value,
         only_errors: errorsCheck.checked ? '1' : ''
       });
-      fetch("/api/log?" + params.toString())
+      fetch("/log/api?" + params.toString())
         .then(r => r.json())
         .then(function (data) {
           if (mySeq !== seq) return;

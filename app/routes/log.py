@@ -53,7 +53,7 @@ def log_page(
     )
 
 
-@router.get("/api/log")
+@router.get("/api")
 def api_log(
     db: Session = Depends(get_db),
     q: str = "",
