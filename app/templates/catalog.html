@@ -318,6 +318,38 @@
       }).join("");
     }
 
+    // Зеркало _page_numbers из catalog.py: 0 = разрыв «…»
+    function pageNums(page, pages) {
+      if (pages <= 7) {
+        var r = []; for (var i = 1; i <= pages; i++) r.push(i); return r;
+      }
+      var set = new Set([1, pages, page, page - 1, page + 1]);
+      var nums = Array.from(set).filter(function(n){ return n >= 1 && n <= pages; }).sort(function(a,b){ return a-b; });
+      var out = [], prev = 0;
+      for (var n of nums) { if (prev && n - prev > 1) out.push(0); out.push(n); prev = n; }
+      return out;
+    }
+
+    // Перестраивает пагинатор с актуальными фильтрами — чтобы ссылки страниц
+    // не теряли q/status/marketplace при переходе на другую страницу.
+    function renderPager(page, pages, q, status, marketplace) {
+      if (!pager) return;
+      if (pages <= 1) { pager.style.display = "none"; return; }
+      var base = "/?q=" + encodeURIComponent(q) + "&status=" + encodeURIComponent(status) +
+                 "&marketplace=" + encodeURIComponent(marketplace) + "&page=";
+      var html = '<a class="page-btn nav' + (page <= 1 ? " disabled" : "") + '" href="' +
+                 (page > 1 ? base + (page - 1) : "#") + '" aria-label="Предыдущая">‹</a>';
+      pageNums(page, pages).forEach(function(p) {
+        html += p === 0
+          ? '<span class="page-gap">…</span>'
+          : '<a class="page-btn' + (p === page ? " current" : "") + '" href="' + base + p + '">' + p + '</a>';
+      });
+      html += '<a class="page-btn nav' + (page >= pages ? " disabled" : "") + '" href="' +
+              (page < pages ? base + (page + 1) : "#") + '" aria-label="Следующая">›</a>';
+      pager.innerHTML = html;
+      pager.style.display = "";
+    }
+
     function run() {
       const mySeq = ++seq;
       spin.hidden = false;
@@ -330,10 +362,7 @@
           spin.hidden = true;
           renderRows(data.items);
           countEl.textContent = "Показано " + data.items.length + " из " + data.total + " книг";
-          // Показываем пагинацию, если страниц больше одной (независимо от фильтров/поиска).
-          if (pager) {
-            pager.style.display = data.pages > 1 ? "" : "none";
-          }
+          renderPager(data.page, data.pages, input.value, statusSel.value, marketplaceSel.value);
           body.classList.remove("fade-in"); void body.offsetWidth; body.classList.add("fade-in");
         })
         .catch(function () { spin.hidden = true; });
