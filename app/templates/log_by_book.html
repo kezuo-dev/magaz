@@ -37,7 +37,13 @@
   <div class="log-group">
     <div class="log-group-header">
       <div class="log-book-info">
-        <span class="mono">{{ group.sku }}</span>
+        <div class="sku-cell">
+          <span class="mono sku-text">{{ group.sku }}</span>
+          <button type="button" class="copy-btn" data-copy="{{ group.sku }}"
+            title="Скопировать артикул" aria-label="Скопировать артикул">
+            <span class="copy-icon" aria-hidden="true">⧉</span>
+          </button>
+        </div>
         {% if group.title %}
         <span class="log-book-title">{{ group.title }}</span>
         {% endif %}
@@ -114,4 +120,36 @@
   background: var(--surface-2);
 }
 </style>
+<script>
+  (function () {
+    function flash(btn, ok) {
+      btn.classList.add(ok ? "copied" : "copy-fail");
+      const icon = btn.querySelector(".copy-icon");
+      const prev = icon.textContent;
+      icon.textContent = ok ? "✓" : "✕";
+      setTimeout(function () {
+        btn.classList.remove("copied", "copy-fail");
+        icon.textContent = prev;
+      }, 1100);
+    }
+    function copyText(text, btn) {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => flash(btn, true)).catch(() => flash(btn, false));
+        return;
+      }
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
+      document.body.appendChild(ta); ta.select();
+      try { flash(btn, document.execCommand("copy")); } catch { flash(btn, false); }
+      document.body.removeChild(ta);
+    }
+    document.addEventListener("click", function (e) {
+      const btn = e.target.closest(".copy-btn");
+      if (!btn) return;
+      e.stopPropagation();
+      copyText(btn.dataset.copy, btn);
+    });
+  })();
+</script>
 {% endblock %}
