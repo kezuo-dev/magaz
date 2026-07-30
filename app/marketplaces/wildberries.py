@@ -154,62 +154,41 @@ class WBClient(MarketplaceClient):
         )
 
     def _move_to_trash(self, external_id: str) -> None:
-        """Переместить карточку товара в корзину.
+        """Переместить карточку товара в корзину WB.
 
-        WB требует либо nmID (внутренний числовой ID карточки), либо vendorCode
-        (артикул продавца). В listing.external_id теперь хранится nmID (после
-        обновления сверки каталога), но старые записи могут содержать vendorCode.
-        Пробуем сначала как nmID, затем как vendorCode.
+        WB API: POST /content/v2/cards/delete/trash с телом {"nmIDs": [123456789]}.
+        Принимает только nmID (числовой ID карточки), vendorCode не поддерживается.
+        В listing.external_id хранится nmID (с момента обновления сверки каталога).
         """
-        import logging
-        logger = logging.getLogger("wildberries")
-
-        # Попытка 1: external_id как nmID (число). У свежих записей это nmID.
         try:
             nm_id = int(external_id)
-            logger.info(f"WB _move_to_trash: пробуем nmID={nm_id}")
-            self._post(
-                f"{CONTENT_URL}/content/v2/cards/trash",
-                {"nmIDs": [nm_id]},
-            )
-            logger.info(f"WB _move_to_trash: успех с nmID={nm_id}")
-            return
         except (ValueError, TypeError) as exc:
-            # external_id не число — пробуем как vendorCode (старые записи).
-            logger.info(f"WB _move_to_trash: external_id={external_id} не число ({exc}), пробуем vendorCode")
-        except MarketplaceError as exc:
-            # Запрос с nmID провалился — пробуем vendorCode как fallback.
-            logger.warning(f"WB _move_to_trash: nmID={nm_id} провалился: {exc}, пробуем vendorCode")
+            raise MarketplaceError(
+                f"У лота Wildberries external_id={external_id} не число — удалить в корзину нельзя. "
+                f"Нужна сверка каталога, чтобы подтянуть nmID."
+            ) from exc
 
-        # Попытка 2: как vendorCode (для старых записей без nmID).
-        logger.info(f"WB _move_to_trash: пробуем vendorCode={external_id}")
         self._post(
-            f"{CONTENT_URL}/content/v2/cards/trash",
-            {"vendorCodes": [external_id]},
+            f"{CONTENT_URL}/content/v2/cards/delete/trash",
+            {"nmIDs": [nm_id]},
         )
-        logger.info(f"WB _move_to_trash: успех с vendorCode={external_id}")
 
     def _restore_from_trash(self, external_id: str) -> None:
         """Восстановить карточку из корзины WB.
 
-        WB принимает nmID или vendorCode — та же логика, что у _move_to_trash.
-        Эндпоинт /content/v2/cards/recover (противоположность /cards/trash).
+        WB API: POST /content/v2/cards/recover с телом {"nmIDs": [123456789]}.
+        Принимает только nmID (числовой ID карточки).
         """
         try:
             nm_id = int(external_id)
-            self._post(
-                f"{CONTENT_URL}/content/v2/cards/recover",
-                {"nmIDs": [nm_id]},
-            )
-            return
-        except (ValueError, TypeError):
-            pass
-        except MarketplaceError:
-            pass
+        except (ValueError, TypeError) as exc:
+            raise MarketplaceError(
+                f"У лота Wildberries external_id={external_id} не число — восстановить из корзины нельзя"
+            ) from exc
 
         self._post(
             f"{CONTENT_URL}/content/v2/cards/recover",
-            {"vendorCodes": [external_id]},
+            {"nmIDs": [nm_id]},
         )
 
     def restore(self, listing) -> None:
