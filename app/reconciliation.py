@@ -157,14 +157,6 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
             book_id=book.id,
             message=(
                 f"Книга {book.sku}: помечена как снятая, но на {marketplace} всё ещё "
-        _log(
-            db,
-            marketplace=marketplace,
-            action="reconcile_withdrawn",
-            ok=False,
-            book_id=book.id,
-            message=(
-                f"Книга {book.sku}: помечена как снятая, но на {marketplace} всё ещё "
                 f"в продаже. Снимаем локально (без API — карточка уже висит на площадке)."
             ),
         )
