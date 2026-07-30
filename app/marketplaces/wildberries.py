@@ -116,6 +116,7 @@ class WBClient(MarketplaceClient):
         мы храним в listing.stock_key. Если по ошибке отправить vendorCode, WB не
         найдёт запись на складе и остаток не обнулится — книга останется висеть.
         """
+        self.last_warning = None
         # Только stock_key (баркод). НЕ откатываемся на external_id: там vendorCode,
         # и WB молча не найдёт по нему запись — книга осталась бы висеть в продаже.
         barcode = getattr(listing, "stock_key", None)
@@ -160,26 +161,33 @@ class WBClient(MarketplaceClient):
         обновления сверки каталога), но старые записи могут содержать vendorCode.
         Пробуем сначала как nmID, затем как vendorCode.
         """
+        import logging
+        logger = logging.getLogger("wildberries")
+
         # Попытка 1: external_id как nmID (число). У свежих записей это nmID.
         try:
             nm_id = int(external_id)
+            logger.info(f"WB _move_to_trash: пробуем nmID={nm_id}")
             self._post(
                 f"{CONTENT_URL}/content/v2/cards/trash",
                 {"nmIDs": [nm_id]},
             )
+            logger.info(f"WB _move_to_trash: успех с nmID={nm_id}")
             return
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
             # external_id не число — пробуем как vendorCode (старые записи).
-            pass
-        except MarketplaceError:
+            logger.info(f"WB _move_to_trash: external_id={external_id} не число ({exc}), пробуем vendorCode")
+        except MarketplaceError as exc:
             # Запрос с nmID провалился — пробуем vendorCode как fallback.
-            pass
+            logger.warning(f"WB _move_to_trash: nmID={nm_id} провалился: {exc}, пробуем vendorCode")
 
         # Попытка 2: как vendorCode (для старых записей без nmID).
+        logger.info(f"WB _move_to_trash: пробуем vendorCode={external_id}")
         self._post(
             f"{CONTENT_URL}/content/v2/cards/trash",
             {"vendorCodes": [external_id]},
         )
+        logger.info(f"WB _move_to_trash: успех с vendorCode={external_id}")
 
     def _restore_from_trash(self, external_id: str) -> None:
         """Восстановить карточку из корзины WB.
