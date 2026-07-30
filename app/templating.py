@@ -1,7 +1,20 @@
 """Общий объект шаблонов Jinja2 — чтобы не создавать его в каждом роуте."""
+from datetime import timezone, timedelta
+
 from fastapi.templating import Jinja2Templates
 
 from app.config import BASE_DIR
+
+_MSK = timezone(timedelta(hours=3))
+
+
+def _to_msk(dt) -> str:
+    """Перевести UTC datetime в московское время и отформатировать."""
+    if dt is None:
+        return "—"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_MSK).strftime("%d.%m %H:%M:%S")
 
 templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
 
@@ -94,3 +107,4 @@ templates.env.globals["listing_status_label"] = listing_status_label
 templates.env.globals["marketplace_label"] = marketplace_label
 templates.env.globals["marketplace_short"] = marketplace_short
 templates.env.globals["sort_listings"] = sort_listings
+templates.env.filters["msk"] = _to_msk

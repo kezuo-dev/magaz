@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Book, Marketplace, SyncLog
-from app.templating import marketplace_label, templates
+from app.templating import marketplace_label, templates, _to_msk
 
 router = APIRouter(prefix="/log")
 
@@ -79,7 +79,7 @@ def api_log(
     for e in entries:
         items.append(
             {
-                "created_at": e.created_at.strftime("%d.%m %H:%M:%S"),
+                "created_at": _to_msk(e.created_at),
                 "marketplace": marketplace_label(e.marketplace) if e.marketplace else "—",
                 "action": e.action,
                 "ok": e.ok,

@@ -57,7 +57,7 @@
       <tbody>
         {% for e in group.entries %}
         <tr class="{{ 'row-error' if not e.ok else '' }}">
-          <td class="nowrap">{{ e.created_at.strftime('%d.%m %H:%M:%S') }}</td>
+          <td class="nowrap">{{ e.created_at | msk }}</td>
           <td>{{ marketplace_label(e.marketplace) if e.marketplace else '—' }}</td>
           <td>{{ e.action }}</td>
           <td>{% if e.ok %}<span class="badge badge-in_stock">ОК</span>{% else %}<span class="badge badge-error">Ошибка</span>{% endif %}</td>
