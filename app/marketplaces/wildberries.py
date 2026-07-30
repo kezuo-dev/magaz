@@ -133,13 +133,11 @@ class WBClient(MarketplaceClient):
             try:
                 self._move_to_trash(external_id)
             except MarketplaceError as exc:
-                # Не роняем всё снятие, если удаление в корзину не прошло —
-                # остаток уже обнулён, книга фактически снята с продажи.
-                # Логируем ошибку, но не пробрасываем её выше.
+                # Остаток уже обнулён — книга не продаётся. Но карточка видна в кабинете,
+                # поэтому пишем в last_warning: sync.py положит это в журнал базы.
+                self.last_warning = f"Остаток обнулён, но карточку {external_id} не удалось удалить в корзину WB: {exc}"
                 import logging
-                logging.getLogger("wildberries").warning(
-                    f"Не удалось переместить карточку {external_id} в корзину: {exc}"
-                )
+                logging.getLogger("wildberries").warning(self.last_warning)
 
     def _set_stock(self, sku: str, stock: int) -> None:
         # Без склада FBS остатки WB не принимает. Это не штатная ситуация при
