@@ -85,7 +85,7 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
             Book.updated_at >= cutoff,
             Book.listings.any(
                 (Listing.marketplace == marketplace)
-                & (Listing.status.in_([ListingStatus.ACTIVE, ListingStatus.WITHDRAWN]))
+                & (Listing.status.in_([ListingStatus.ACTIVE, ListingStatus.WITHDRAWN, ListingStatus.ERROR]))
             ),
         )
     ).all()
