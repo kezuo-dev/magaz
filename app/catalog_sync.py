@@ -41,7 +41,7 @@ from app.models import (
     utcnow,
 )
 from app.security import decrypt_credentials
-from app.sync import refresh_book_status, withdraw_book_everywhere
+from app.sync import refresh_book_status
 
 # Поля книги, на которые сопоставляются колонки выгрузки (ключи = поля модели).
 TARGET_FIELDS = {
@@ -82,13 +82,22 @@ def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing)
     """Единый путь снятия книги, пропавшей/проданной на площадке `marketplace`.
 
     Помечаем лот этой площадки снятым (остатка там уже нет — живой вызов не нужен)
-    и кросс-снимаем с остальных площадок. Статус книги пересчитывается единой
-    функцией refresh_book_status: пока активен хоть один лот — книга в продаже;
-    если лотов не осталось, «Продана» ставится при наличии заказа, иначе «Снята».
+    и локально снимаем лоты на остальных площадках. API других площадок НЕ вызываем:
+    сверка каталога обнаруживает факт пропажи постфактум (книга уже снята/продана),
+    и нет смысла дёргать API — достаточно пометить локально. Статус книги
+    пересчитывается единой функцией refresh_book_status.
     """
     listing.status = ListingStatus.WITHDRAWN
     listing.last_synced_at = utcnow()
-    withdraw_book_everywhere(db, book, except_marketplace=marketplace)
+
+    # Локально снимаем лоты на остальных площадках БЕЗ вызова API — сверка каталога
+    # реагирует на факт пропажи (книга уже снята/продана площадкой), поэтому живой
+    # вызов withdraw() только заархивирует Ozon-карточку, которая ещё в продаже.
+    for other_listing in book.listings:
+        if other_listing.marketplace != marketplace and other_listing.status == ListingStatus.ACTIVE:
+            other_listing.status = ListingStatus.WITHDRAWN
+            other_listing.last_synced_at = utcnow()
+
     refresh_book_status(db, book)
 
 
