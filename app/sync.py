@@ -88,8 +88,12 @@ def _get_active_client(db: Session, marketplace: str):
         return None
 
 
-def withdraw_book(db: Session, book: Book, marketplace: str) -> bool:
-    """Снять книгу с одной площадки. True — если живой вызов прошёл успешно."""
+def withdraw_book(db: Session, book: Book, marketplace: str, *, use_sell: bool = False) -> bool:
+    """Снять книгу с одной площадки. True — если живой вызов прошёл успешно.
+
+    use_sell=True — использовать sell() вместо withdraw(): обнуляет остаток без
+    архивации Ozon. Нужно для сверки снятых книг, чтобы не архивировать карточки.
+    """
     listing = next((l for l in book.listings if l.marketplace == marketplace), None)
     if listing is None:
         return False
@@ -105,14 +109,14 @@ def withdraw_book(db: Session, book: Book, marketplace: str) -> bool:
         return False
 
     try:
-        client.withdraw(listing)
+        if use_sell:
+            client.sell(listing)
+        else:
+            client.withdraw(listing)
         listing.status = ListingStatus.WITHDRAWN
         listing.last_error = None
         listing.last_synced_at = utcnow()
         msg = f"Снято с {marketplace}"
-        # Если есть предупреждение о частичном успехе (например, карточка Ozon не
-        # заархивирована) — добавляем его в журнал. Снятие считается успешным
-        # (остаток обнулён, книга не продаётся), но warning видно в логах.
         if client.last_warning:
             msg += f". {client.last_warning}"
         _log(db, marketplace=marketplace, action="withdraw", ok=True, book_id=book.id,
