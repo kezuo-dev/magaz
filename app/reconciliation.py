@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.marketplaces import MarketplaceError, get_client, is_supported
 from app.models import Book, BookStatus, Listing, ListingStatus, MarketplaceAccount, SyncLog, utcnow
 from app.security import decrypt_credentials
-from app.sync import refresh_book_status, withdraw_book
+from app.sync import refresh_book_status
 
 
 def _log(db: Session, *, marketplace, action, ok, message, book_id=None) -> None:
@@ -157,49 +157,35 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
             book_id=book.id,
             message=(
                 f"Книга {book.sku}: помечена как снятая, но на {marketplace} всё ещё "
-                f"в продаже. Снимаем повторно."
+        _log(
+            db,
+            marketplace=marketplace,
+            action="reconcile_withdrawn",
+            ok=False,
+            book_id=book.id,
+            message=(
+                f"Книга {book.sku}: помечена как снятая, но на {marketplace} всё ещё "
+                f"в продаже. Снимаем локально (без API — карточка уже висит на площадке)."
             ),
         )
 
-        # Меняем статус лота обратно на ACTIVE, чтобы withdraw_book сработал.
-        # Сохраняем старые статусы для отката при ошибке.
-        old_listing_status = listing.status
-        old_book_status = book.status
-        listing.status = ListingStatus.ACTIVE
-        book.status = BookStatus.IN_STOCK
+        # Локально помечаем лот WITHDRAWN — НЕ вызываем withdraw_book(), т.к. это
+        # заархивирует Ozon-карточку. Сверка обнаруживает рассинхрон постфактум,
+        # живой вызов API здесь лишний — книга всё равно висит на площадке.
+        listing.status = ListingStatus.WITHDRAWN
+        listing.last_synced_at = utcnow()
+        fixed += 1
+        _log(
+            db,
+            marketplace=marketplace,
+            action="reconcile_withdrawn",
+            ok=True,
+            book_id=book.id,
+            message=f"Книга {book.sku}: локально помечена снятой (API не вызывался)",
+        )
 
-        # Повторное снятие с новой логикой (с архивацией для Ozon)
-        try:
-            success = withdraw_book(db, book, marketplace)
-            if success:
-                fixed += 1
-                _log(
-                    db,
-                    marketplace=marketplace,
-                    action="reconcile_withdrawn",
-                    ok=True,
-                    book_id=book.id,
-                    message=f"Книга {book.sku}: повторное снятие выполнено",
-                )
-            else:
-                # withdraw_book уже записал причину ошибки в журнал отдельной строкой
-                failed += 1
-
-            # Обновляем статус книги после повторного снятия
-            refresh_book_status(db, book)
-        except Exception as exc:
-            # Непредвиденная ошибка (не MarketplaceError) — откатываем статусы
-            listing.status = old_listing_status
-            book.status = old_book_status
-            failed += 1
-            _log(
-                db,
-                marketplace=marketplace,
-                action="reconcile_withdrawn",
-                ok=False,
-                book_id=book.id,
-                message=f"Книга {book.sku}: сбой при снятии — {exc}",
-            )
+        # Обновляем статус книги после локального снятия
+        refresh_book_status(db, book)
 
     # Итог пишем ВСЕГДА, даже когда исправлять нечего: иначе после нажатия
     # «Проверить снятые» в журнале не остаётся никакого следа и непонятно,
