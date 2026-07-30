@@ -98,7 +98,7 @@ def _sorted_books_query(stmt):
     а история (продано/снято) не мешается в начале каталога.
     """
     in_sale_first = case((Book.status == BookStatus.IN_STOCK, 0), else_=1)
-    return stmt.order_by(in_sale_first, Book.updated_at.desc())
+    return stmt.order_by(in_sale_first, Book.created_at.desc())
 
 
 def _catalog_stats(db: Session) -> dict:

@@ -214,19 +214,42 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
         new_count += 1
 
         if book:
-            # Снимаем с площадки продажи через полный API-путь — для Ozon это
-            # обнуляет остаток И архивирует карточку. Раньше статус ставился
-            # вручную без API, и карточка Ozon оставалась видна покупателям.
-            withdraw_book(db, book, marketplace)
-            # Кросс-снятие с других площадок. Если рубильник выключен, снятие не
-            # выполнится — тогда заказ НЕ помечаем processed, чтобы позже (после
-            # включения автоснятия) продажу можно было отзеркалить.
-            done = withdraw_book_everywhere(db, book, except_marketplace=marketplace)
+            # Снимаем книгу со ВСЕХ площадок (включая ту, где продали).
+            # Используем sell(), а не withdraw(): для Ozon это обнуляет остаток БЕЗ
+            # архивации (чтобы при отмене вернуть в продажу), для WB — обнуляет И
+            # удаляет в корзину. Раньше снимали только с площадки продажи через
+            # withdraw() (с архивацией Ozon) → при отмене из архива не достать.
+            for listing in book.listings:
+                if listing.status == ListingStatus.ACTIVE:
+                    client = _get_active_client(db, listing.marketplace)
+                    if client is None:
+                        listing.status = ListingStatus.WITHDRAWN
+                        listing.last_error = None
+                        listing.last_synced_at = utcnow()
+                        _log(db, marketplace=listing.marketplace, action="sell", ok=True, book_id=book.id,
+                             message="Локально (площадка выключена): лот снят после продажи")
+                    else:
+                        try:
+                            client.sell(listing)
+                            listing.status = ListingStatus.WITHDRAWN
+                            listing.last_error = None
+                            listing.last_synced_at = utcnow()
+                            msg = f"Снято с {listing.marketplace} после продажи на {marketplace}"
+                            if client.last_warning:
+                                msg += f". {client.last_warning}"
+                            _log(db, marketplace=listing.marketplace, action="sell", ok=True, book_id=book.id,
+                                 message=msg)
+                        except MarketplaceError as exc:
+                            listing.status = ListingStatus.ERROR
+                            listing.last_error = str(exc)
+                            _log(db, marketplace=listing.marketplace, action="sell", ok=False, book_id=book.id,
+                                 message=f"Не удалось снять с {listing.marketplace}: {exc}")
+
             # flush нужен, чтобы refresh_book_status увидел только что добавленный
             # заказ (он ищет его в базе) и поставил «Продана», а не «Снята».
             db.flush()
             refresh_book_status(db, book)
-            order.processed = done
+            order.processed = True
             _log(db, marketplace=marketplace, action="order_sold", ok=True, book_id=book.id,
                  message=f"Заказ {info.external_order_id}: книга {book.sku} продана на {marketplace}")
         else:

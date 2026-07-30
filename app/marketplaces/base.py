@@ -45,8 +45,22 @@ class MarketplaceClient:
         # состоялось), но и терять нельзя: вызывающий код пишет это в журнал.
         self.last_warning: str | None = None
 
+    def sell(self, listing) -> None:
+        """Снять лот после продажи (обнулить остаток, но НЕ архивировать/в корзину для Ozon).
+
+        Используется при обработке заказов. Отличается от withdraw():
+        - Ozon: только обнулить остаток, БЕЗ архивации (чтобы при отмене вернуть в продажу)
+        - WB: обнулить остаток И удалить в корзину (как при ручном снятии)
+
+        По умолчанию = withdraw (для обратной совместимости с площадками без отличий).
+        """
+        self.withdraw(listing)
+
     def withdraw(self, listing) -> None:
-        """Снять лот с продажи. listing — ORM-объект Listing с external_id."""
+        """Снять лот с продажи вручную (полное снятие с архивацией для Ozon).
+
+        listing — ORM-объект Listing с external_id.
+        """
         raise NotImplementedError
 
     def restore(self, listing) -> None:
