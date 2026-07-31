@@ -22,6 +22,7 @@ from app.db import SessionLocal
 from app.models import MarketplaceAccount
 from app.reconciliation import reconcile_all_marketplaces
 from app.sync import poll_marketplace_orders, process_cancelled_orders
+from app.wb_trash import move_withdrawn_to_trash
 
 logger = logging.getLogger("scheduler")
 
@@ -122,6 +123,31 @@ def reconcile_all_withdrawn() -> None:
         db.close()
 
 
+def cleanup_wb_trash() -> None:
+    """Удалить снятые книги в корзину WB (ночью в 00:00 МСК).
+
+    Проходит по всем снятым книгам с лотом WB и удаляет карточки небольшими
+    пачками с паузами, чтобы не схлопнуть лимит API (429).
+    """
+    db = SessionLocal()
+    try:
+        result = move_withdrawn_to_trash(db)
+        db.commit()
+        processed = result.get("processed", 0)
+        deleted = result.get("deleted", 0)
+        failed = result.get("failed", 0)
+        if processed:
+            logger.info(
+                "Очистка корзины WB: обработано %s, удалено %s, не удалось %s",
+                processed, deleted, failed
+            )
+    except Exception:  # noqa: BLE001 — сбой очистки не должен ронять планировщик
+        db.rollback()
+        logger.exception("Сбой очистки корзины WB")
+    finally:
+        db.close()
+
+
 def start_scheduler() -> None:
     global _scheduler
     if not settings.scheduler_enabled or _scheduler is not None:
@@ -167,9 +193,18 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    _scheduler.add_job(
+        cleanup_wb_trash,
+        trigger="cron",
+        hour=21,  # 00:00 МСК = 21:00 UTC (серверное время)
+        minute=0,
+        id="wb_trash_cleanup",
+        max_instances=1,
+        coalesce=True,
+    )
     _scheduler.start()
     logger.info(
-        "Планировщик запущен: заказы %s мин, остатки %s мин, сверка каталога %s мин, сверка снятых 10 мин",
+        "Планировщик запущен: заказы %s мин, остатки %s мин, сверка каталога %s мин, сверка снятых 10 мин, очистка корзины WB в 00:00 МСК",
         settings.poll_interval_minutes,
         settings.stock_watch_interval_minutes,
         settings.catalog_sync_interval_minutes,
