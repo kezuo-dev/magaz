@@ -109,6 +109,21 @@ class WBClient(MarketplaceClient):
             {"settings": {"cursor": {"limit": 1}, "filter": {"withPhoto": -1}}},
         )
 
+    def sell(self, listing) -> None:
+        """Снять лот после продажи — только обнулить остаток (БЕЗ удаления в корзину).
+
+        Используется при обработке заказов и сверке. Удаление в корзину вынесено в
+        отдельную кнопку «Очистить корзину WB», чтобы не схлопнуть лимит API (429).
+        """
+        self.last_warning = None
+        barcode = getattr(listing, "stock_key", None)
+        if not barcode:
+            raise MarketplaceError(
+                "У лота Wildberries нет баркода (stock_key) — снять остаток нельзя. "
+                "Нужна сверка каталога, чтобы подтянуть баркод."
+            )
+        self._set_stock(barcode, 0)
+
     def withdraw(self, listing) -> None:
         """Снять лот с продажи — обнуляем остаток на складе FBS, затем удаляем карточку в корзину.
 

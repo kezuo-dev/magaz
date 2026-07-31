@@ -9,6 +9,7 @@
     <button type="button" id="sync-btn">Обновить каталог</button>
     <button type="button" id="check-forbidden-btn">Проверить запрещённые темы</button>
     <button type="button" id="reconcile-btn">Проверить снятые</button>
+    <button type="button" id="wb-trash-btn">Очистить корзину WB</button>
     <button type="button" class="ghost-danger" id="wipe-open">Очистить</button>
   </div>
 </div>
@@ -179,6 +180,22 @@
   </div>
 </div>
 
+<!-- Модалка подтверждения очистки корзины WB -->
+<div class="modal-overlay" id="wb-trash-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wb-trash-title">
+    <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
+    <div class="modal-icon">🗑️</div>
+    <h2 id="wb-trash-title">Очистить корзину WB?</h2>
+    <p class="muted">Программа пройдёт по всем снятым книгам с лотом Wildberries и удалит карточки в корзину небольшими пачками. Это может занять некоторое время.</p>
+    <form method="post" action="/catalog/wb_trash" class="modal-form js-loading-form">
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-close>Отмена</button>
+        <button type="submit" data-loading-text="Удаляем в корзину…">Очистить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
   // ---- Закрытие уведомлений крестиком (с плавным исчезновением) ----
   document.querySelectorAll(".notice-close").forEach(function (btn) {
@@ -203,6 +220,7 @@
   document.getElementById("sync-btn").addEventListener("click", () => openModal("sync-modal"));
   document.getElementById("check-forbidden-btn").addEventListener("click", () => location.href = "/catalog/check_forbidden");
   document.getElementById("reconcile-btn").addEventListener("click", () => openModal("reconcile-modal"));
+  document.getElementById("wb-trash-btn").addEventListener("click", () => openModal("wb-trash-modal"));
   document.querySelectorAll(".modal-overlay").forEach(function (ov) {
     ov.addEventListener("click", function (e) {
       if (e.target === ov || e.target.hasAttribute("data-close")) closeModal(ov);

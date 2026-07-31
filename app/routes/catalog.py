@@ -27,6 +27,7 @@ from app.models import (
 from app.pdf_export import generate_forbidden_pdf
 from app.photos import UPLOAD_DIR
 from app.reconciliation import reconcile_all_marketplaces
+from app.wb_trash import move_withdrawn_to_trash
 from app.templating import (
     book_status_css,
     book_status_hint,
@@ -354,3 +355,29 @@ def reconcile_withdrawn(db: Session = Depends(get_db)):
     from urllib.parse import quote
     message = "; ".join(parts) if parts else "Проверка снятых книг: проверять нечего"
     return RedirectResponse("/?synced=" + quote(message), status_code=303)
+
+
+@router.post("/catalog/wb_trash")
+def wb_trash(db: Session = Depends(get_db)):
+    """Кнопка «Очистить корзину WB»: удалить снятые книги в корзину Wildberries.
+
+    Проходит по всем снятым книгам с лотом WB, собирает nmID и удаляет карточки
+    небольшими пачками с паузами (чтобы не схлопнуть лимит API 429).
+    """
+    result = move_withdrawn_to_trash(db)
+    db.commit()
+
+    processed = result.get("processed", 0)
+    deleted = result.get("deleted", 0)
+    failed = result.get("failed", 0)
+
+    if not processed:
+        message = "Очистка корзины WB: снятых книг для удаления нет"
+    else:
+        message = f"WB: обработано {processed}, удалено в корзину {deleted}"
+        if failed:
+            message += f", не удалось удалить {failed}"
+
+    from urllib.parse import quote
+    return RedirectResponse("/?synced=" + quote(message), status_code=303)
+
