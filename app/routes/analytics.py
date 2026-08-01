@@ -56,17 +56,19 @@ def _build_stats(db: Session) -> dict:
     mp_sales_total = sum(mp_sales.values()) or 1  # защита от деления на 0
 
     # ---------- График: продажи по дням за 30 дней ----------
-    # Собираем кол-во заказов на каждый день. База хранит UTC, делаем +3.
-    day_rows = db.execute(
-        select(
-            func.date(func.datetime(Order.created_at, "+3 hours")),
-            func.count(Order.id),
-        )
+    # Тянем только created_at без GROUP BY на стороне БД — так работает и на
+    # SQLite, и на PostgreSQL (func.datetime SQLite-специфичен и падает на PG).
+    raw_dates = db.scalars(
+        select(Order.created_at)
         .where(Order.created_at >= cutoff_30, Order.cancelled == False)  # noqa: E712
-        .group_by(func.date(func.datetime(Order.created_at, "+3 hours")))
-        .order_by(func.date(func.datetime(Order.created_at, "+3 hours")))
     ).all()
-    chart_data: dict[str, int] = {row[0]: row[1] for row in day_rows}
+    _MSK = timezone(timedelta(hours=3))
+    chart_data: dict[str, int] = {}
+    for dt in raw_dates:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        key = dt.astimezone(_MSK).strftime("%Y-%m-%d")
+        chart_data[key] = chart_data.get(key, 0) + 1
 
     # Заполняем нули для дней без заказов
     days_series: list[dict] = []
