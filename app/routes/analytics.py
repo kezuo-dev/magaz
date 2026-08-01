@@ -1,4 +1,4 @@
-"""Страница аналитики: продажи, заказы, здоровье синхронизации."""
+"""Страница аналитики: продажи, заказы."""
 from __future__ import annotations
 
 from datetime import timedelta, timezone
@@ -9,14 +9,49 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Book, BookStatus, Order, SyncLog, utcnow
+from app.models import Book, BookStatus, Order, utcnow
 from app.templating import marketplace_label, templates
 
 router = APIRouter(prefix="/analytics")
 
+_MSK = timezone(timedelta(hours=3))
+
+
+def _day_series(db: Session, days: int, marketplace: str | None = None) -> list[dict]:
+    """Возвращает список {date, label, count} за последние `days` дней."""
+    now = utcnow()
+    cutoff = now - timedelta(days=days - 1)
+
+    q = select(Order.created_at).where(
+        Order.created_at >= cutoff,
+        Order.cancelled == False,  # noqa: E712
+    )
+    if marketplace:
+        q = q.where(Order.marketplace == marketplace)
+
+    raw = db.scalars(q).all()
+
+    chart: dict[str, int] = {}
+    for dt in raw:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        key = dt.astimezone(_MSK).strftime("%Y-%m-%d")
+        chart[key] = chart.get(key, 0) + 1
+
+    series = []
+    for i in range(days):
+        day = now - timedelta(days=days - 1 - i)
+        key = day.astimezone(_MSK).strftime("%Y-%m-%d")
+        series.append({
+            "date": key,
+            "label": day.astimezone(_MSK).strftime("%d.%m"),
+            "count": chart.get(key, 0),
+        })
+    return series
+
+
 def _build_stats(db: Session) -> dict:
     now = utcnow()
-    tz = timezone.utc
 
     # ---------- Каталог ----------
     total_books = db.scalar(select(func.count(Book.id))) or 0
@@ -24,72 +59,48 @@ def _build_stats(db: Session) -> dict:
     sold_total = db.scalar(select(func.count(Book.id)).where(Book.status == BookStatus.SOLD)) or 0
     withdrawn_total = db.scalar(select(func.count(Book.id)).where(Book.status == BookStatus.WITHDRAWN)) or 0
 
-    # ---------- Заказы ----------
-    total_orders = db.scalar(select(func.count(Order.id))) or 0
-    cancelled_orders = db.scalar(select(func.count(Order.id)).where(Order.cancelled == True)) or 0  # noqa: E712
-    active_orders = db.scalar(
-        select(func.count(Order.id)).where(Order.cancelled == False, Order.processed == True)  # noqa: E712
-    ) or 0
+    # ---------- Заказы за периоды ----------
+    def _orders(days: int) -> int:
+        cutoff = now - timedelta(days=days)
+        return db.scalar(
+            select(func.count(Order.id)).where(
+                Order.created_at >= cutoff, Order.cancelled == False  # noqa: E712
+            )
+        ) or 0
 
-    # ---------- 30 дней ----------
-    cutoff_30 = now - timedelta(days=30)
-    cutoff_7 = now - timedelta(days=7)
+    def _cancels(days: int) -> int:
+        cutoff = now - timedelta(days=days)
+        return db.scalar(
+            select(func.count(Order.id)).where(
+                Order.created_at >= cutoff, Order.cancelled == True  # noqa: E712
+            )
+        ) or 0
 
-    orders_30d = db.scalar(
-        select(func.count(Order.id)).where(Order.created_at >= cutoff_30, Order.cancelled == False)  # noqa: E712
-    ) or 0
-    orders_7d = db.scalar(
-        select(func.count(Order.id)).where(Order.created_at >= cutoff_7, Order.cancelled == False)  # noqa: E712
-    ) or 0
-    cancellations_30d = db.scalar(
-        select(func.count(Order.id)).where(Order.created_at >= cutoff_30, Order.cancelled == True)  # noqa: E712
-    ) or 0
+    orders_7d = _orders(7)
+    orders_30d = _orders(30)
+    orders_90d = _orders(90)
+    cancellations_7d = _cancels(7)
+    cancellations_30d = _cancels(30)
+    cancellations_90d = _cancels(90)
 
-    # ---------- Разбивка по площадкам (все не-отменённые заказы) ----------
-    mp_rows = db.execute(
-        select(Order.marketplace, func.count(Order.id))
-        .where(Order.cancelled == False)  # noqa: E712
-        .group_by(Order.marketplace)
-    ).all()
-    mp_sales: dict[str, int] = {row[0]: row[1] for row in mp_rows}
-    mp_sales_total = sum(mp_sales.values()) or 1  # защита от деления на 0
+    # ---------- Серии для графиков (90 дней) ----------
+    total_series = _day_series(db, 90)
+    ozon_series = _day_series(db, 90, "ozon")
+    wb_series = _day_series(db, 90, "wildberries")
 
-    # ---------- График: продажи по дням за 30 дней ----------
-    # Тянем только created_at без GROUP BY на стороне БД — так работает и на
-    # SQLite, и на PostgreSQL (func.datetime SQLite-специфичен и падает на PG).
-    raw_dates = db.scalars(
-        select(Order.created_at)
-        .where(Order.created_at >= cutoff_30, Order.cancelled == False)  # noqa: E712
-    ).all()
-    _MSK = timezone(timedelta(hours=3))
-    chart_data: dict[str, int] = {}
-    for dt in raw_dates:
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        key = dt.astimezone(_MSK).strftime("%Y-%m-%d")
-        chart_data[key] = chart_data.get(key, 0) + 1
-
-    # Заполняем нули для дней без заказов
-    days_series: list[dict] = []
-    for i in range(30):
-        day = now - timedelta(days=29 - i)
-        key = day.strftime("%Y-%m-%d")
-        days_series.append({"date": key, "label": day.strftime("%d.%m"), "count": chart_data.get(key, 0)})
-
-    # ---------- Последние 10 продаж ----------
+    # ---------- Последние 15 продаж ----------
     recent_orders = db.execute(
         select(Order, Book)
         .join(Book, Book.id == Order.book_id, isouter=True)
         .where(Order.cancelled == False, Order.book_id.is_not(None))  # noqa: E712
         .order_by(Order.created_at.desc())
-        .limit(10)
+        .limit(15)
     ).all()
 
     recent_sales = []
     for order, book in recent_orders:
         if book:
             recent_sales.append({
-                "sku": book.sku,
                 "title": book.title,
                 "author": book.author or "",
                 "marketplace": marketplace_label(order.marketplace),
@@ -99,54 +110,21 @@ def _build_stats(db: Session) -> dict:
                 "book_id": book.id,
             })
 
-    # ---------- Топ авторов по продажам ----------
-    author_rows = db.execute(
-        select(Book.author, func.count(Order.id).label("sales"))
-        .join(Order, Order.book_id == Book.id)
-        .where(Order.cancelled == False, Book.author.is_not(None))  # noqa: E712
-        .group_by(Book.author)
-        .order_by(func.count(Order.id).desc())
-        .limit(8)
-    ).all()
-    top_authors = [{"author": row[0], "sales": row[1]} for row in author_rows]
-    max_author_sales = top_authors[0]["sales"] if top_authors else 1
-
-    # ---------- Здоровье синхронизации (ошибки за 24ч) ----------
-    cutoff_24h = now - timedelta(hours=24)
-    errors_24h = db.scalar(
-        select(func.count(SyncLog.id)).where(SyncLog.created_at >= cutoff_24h, SyncLog.ok == False)  # noqa: E712
-    ) or 0
-    total_24h = db.scalar(
-        select(func.count(SyncLog.id)).where(SyncLog.created_at >= cutoff_24h)
-    ) or 0
-    health_pct = round(100 * (total_24h - errors_24h) / total_24h) if total_24h else 100
-
-    # Последняя ошибка синхронизации
-    last_error = db.scalar(
-        select(SyncLog).where(SyncLog.ok == False).order_by(SyncLog.created_at.desc()).limit(1)  # noqa: E712
-    )
-
     return {
         "total_books": total_books,
         "in_stock": in_stock,
         "sold_total": sold_total,
         "withdrawn_total": withdrawn_total,
-        "total_orders": total_orders,
-        "active_orders": active_orders,
-        "cancelled_orders": cancelled_orders,
-        "orders_30d": orders_30d,
         "orders_7d": orders_7d,
+        "orders_30d": orders_30d,
+        "orders_90d": orders_90d,
+        "cancellations_7d": cancellations_7d,
         "cancellations_30d": cancellations_30d,
-        "mp_sales": mp_sales,
-        "mp_sales_total": mp_sales_total,
-        "days_series": days_series,
+        "cancellations_90d": cancellations_90d,
+        "total_series": total_series,
+        "ozon_series": ozon_series,
+        "wb_series": wb_series,
         "recent_sales": recent_sales,
-        "top_authors": top_authors,
-        "max_author_sales": max_author_sales,
-        "errors_24h": errors_24h,
-        "total_24h": total_24h,
-        "health_pct": health_pct,
-        "last_error": last_error,
     }
 
 

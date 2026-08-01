@@ -1,165 +1,121 @@
 {% extends "base.html" %}
 {% block title %}Аналитика — Букинист{% endblock %}
 {% block content %}
+
+<!-- Данные для графиков (90 дней) -->
 <script>
-// Убираем ?t=... из адресной строки — после этого F5 снова попросит пароль
-history.replaceState(null, '', '/analytics');
+var AN = {
+  total:  {{ stats.total_series  | tojson }},
+  ozon:   {{ stats.ozon_series   | tojson }},
+  wb:     {{ stats.wb_series     | tojson }},
+  kpi: {
+    7:  { orders: {{ stats.orders_7d  }}, cancels: {{ stats.cancellations_7d  }} },
+    30: { orders: {{ stats.orders_30d }}, cancels: {{ stats.cancellations_30d }} },
+    90: { orders: {{ stats.orders_90d }}, cancels: {{ stats.cancellations_90d }} },
+  }
+};
 </script>
-<div class="page-head">
-  <div>
-    <h1>Аналитика</h1>
-    <p class="page-sub muted">Продажи, заказы и состояние синхронизации</p>
-  </div>
-  <div class="head-actions">
-    <span class="an-updated muted" id="an-updated">Обновлено только что</span>
-  </div>
-</div>
 
-<!-- ===== KPI ===== -->
-<div class="an-kpi-row">
-  <div class="an-kpi">
-    <div class="an-kpi-icon an-kpi-icon--green">📦</div>
-    <div class="an-kpi-body">
-      <div class="an-kpi-num">{{ stats.in_stock }}</div>
-      <div class="an-kpi-label">В продаже сейчас</div>
-    </div>
-  </div>
-  <div class="an-kpi">
-    <div class="an-kpi-icon an-kpi-icon--purple">🛒</div>
-    <div class="an-kpi-body">
-      <div class="an-kpi-num">{{ stats.orders_7d }}</div>
-      <div class="an-kpi-label">Продаж за 7 дней</div>
-    </div>
-  </div>
-  <div class="an-kpi">
-    <div class="an-kpi-icon an-kpi-icon--blue">📈</div>
-    <div class="an-kpi-body">
-      <div class="an-kpi-num">{{ stats.orders_30d }}</div>
-      <div class="an-kpi-label">Продаж за 30 дней</div>
-    </div>
-  </div>
-  <div class="an-kpi">
-    <div class="an-kpi-icon an-kpi-icon--red">❌</div>
-    <div class="an-kpi-body">
-      <div class="an-kpi-num">{{ stats.cancellations_30d }}</div>
-      <div class="an-kpi-label">Отмен за 30 дней</div>
-    </div>
-  </div>
-  <div class="an-kpi">
-    <div class="an-kpi-icon an-kpi-icon--ink">📚</div>
-    <div class="an-kpi-body">
-      <div class="an-kpi-num">{{ stats.total_books }}</div>
-      <div class="an-kpi-label">Книг в каталоге</div>
-    </div>
-  </div>
-  <div class="an-kpi {% if stats.health_pct >= 95 %}an-kpi--ok{% elif stats.health_pct >= 80 %}an-kpi--warn{% else %}an-kpi--err{% endif %}">
-    <div class="an-kpi-icon an-kpi-icon--{{ 'green' if stats.health_pct >= 95 else ('orange' if stats.health_pct >= 80 else 'red') }}">⚡</div>
-    <div class="an-kpi-body">
-      <div class="an-kpi-num">{{ stats.health_pct }}%</div>
-      <div class="an-kpi-label">Синхронизация 24ч</div>
-    </div>
-  </div>
-</div>
+<div class="an2-page">
 
-<!-- ===== Сетка ===== -->
-<div class="an-grid">
-
-  <!-- График продаж -->
-  <div class="an-card an-card--wide">
-    <div class="an-card-head">
-      <span class="an-card-title">Продажи за 30 дней</span>
-      <span class="muted" style="font-size:13px">по дате заказа (МСК)</span>
+  <!-- ===== Шапка ===== -->
+  <div class="an2-header">
+    <div>
+      <h1 class="an2-title">Аналитика</h1>
+      <p class="an2-sub">Продажи и заказы</p>
     </div>
-    <div class="an-chart-wrap" id="sales-chart-wrap">
-      {% set series = stats.days_series %}
-      {% set max_val = series | map(attribute='count') | max %}
-      {% set max_val = max_val if max_val > 0 else 1 %}
-      <svg class="an-chart" viewBox="0 0 620 130" preserveAspectRatio="none" aria-hidden="true">
-        <!-- Горизонтальные направляющие -->
-        {% for y_pct in [0, 25, 50, 75, 100] %}
-          {% set y = 110 - y_pct * 0.9 %}
-          <line x1="0" y1="{{ y }}" x2="620" y2="{{ y }}" stroke="var(--line)" stroke-width="1"/>
-        {% endfor %}
-        <!-- Столбики -->
-        {% for d in series %}
-          {% set x = loop.index0 * 620 / 30 + 3 %}
-          {% set bar_h = (d.count / max_val) * 90 %}
-          {% set bar_y = 110 - bar_h %}
-          {% set bar_w = 620 / 30 - 3 %}
-          <rect class="an-bar{% if d.count == 0 %} an-bar--zero{% endif %}"
-                x="{{ x }}" y="{{ bar_y }}"
-                width="{{ bar_w }}" height="{{ bar_h }}"
-                rx="3"
-                data-label="{{ d.label }}" data-count="{{ d.count }}"/>
-        {% endfor %}
-        <!-- Метки оси X (каждые 5 дней) -->
-        {% for d in series %}
-          {% if loop.index0 % 5 == 0 %}
-            {% set x = loop.index0 * 620 / 30 + 3 %}
-            <text x="{{ x + 620/30/2 - 3 }}" y="125" class="an-axis-label">{{ d.label }}</text>
-          {% endif %}
-        {% endfor %}
-      </svg>
-      <!-- Тултип -->
-      <div class="an-tooltip" id="an-tooltip" hidden></div>
+    <!-- Переключатель периода -->
+    <div class="an2-period" id="an2-period">
+      <button class="an2-period-btn" data-days="7">7 дней</button>
+      <button class="an2-period-btn an2-period-btn--active" data-days="30">30 дней</button>
+      <button class="an2-period-btn" data-days="90">90 дней</button>
     </div>
   </div>
 
-  <!-- Разбивка по площадкам -->
-  <div class="an-card">
-    <div class="an-card-head">
-      <span class="an-card-title">По площадкам</span>
-      <span class="muted" style="font-size:13px">все продажи</span>
+  <!-- ===== KPI ===== -->
+  <div class="an2-kpi-row" id="an2-kpi">
+    <div class="an2-kpi an2-kpi--accent">
+      <div class="an2-kpi-icon">🛒</div>
+      <div class="an2-kpi-val" id="kpi-orders">{{ stats.orders_30d }}</div>
+      <div class="an2-kpi-label">Продаж</div>
     </div>
-    <div class="an-mp-list">
-      {% for mp_key, mp_count in stats.mp_sales.items() %}
-      {% set pct = (mp_count / stats.mp_sales_total * 100) | round(1) %}
-      <div class="an-mp-row">
-        <span class="mp mp-active" title="{{ mp_key }}">{{ mp_key[:2].upper() }}</span>
-        <div class="an-mp-info">
-          <div class="an-mp-name">{{ mp_key | capitalize if mp_key != 'wildberries' else 'Wildberries' }}</div>
-          <div class="an-mp-bar-wrap">
-            <div class="an-mp-bar" style="width: {{ pct }}%"></div>
-          </div>
-        </div>
-        <span class="an-mp-count">{{ mp_count }}</span>
+    <div class="an2-kpi an2-kpi--red">
+      <div class="an2-kpi-icon">↩️</div>
+      <div class="an2-kpi-val" id="kpi-cancels">{{ stats.cancellations_30d }}</div>
+      <div class="an2-kpi-label">Отмен</div>
+    </div>
+    <div class="an2-kpi an2-kpi--green">
+      <div class="an2-kpi-icon">📦</div>
+      <div class="an2-kpi-val">{{ stats.in_stock }}</div>
+      <div class="an2-kpi-label">В продаже</div>
+    </div>
+    <div class="an2-kpi an2-kpi--purple">
+      <div class="an2-kpi-icon">✅</div>
+      <div class="an2-kpi-val">{{ stats.sold_total }}</div>
+      <div class="an2-kpi-label">Всего продано</div>
+    </div>
+    <div class="an2-kpi an2-kpi--ink">
+      <div class="an2-kpi-icon">📚</div>
+      <div class="an2-kpi-val">{{ stats.total_books }}</div>
+      <div class="an2-kpi-label">Книг в каталоге</div>
+    </div>
+  </div>
+
+  <!-- ===== Графики ===== -->
+  <div class="an2-charts">
+
+    <!-- Большой: Общий -->
+    <div class="an2-card an2-card--wide">
+      <div class="an2-card-head">
+        <span class="an2-card-title">Все продажи</span>
+        <span class="an2-card-sub" id="chart-total-sub">за 30 дней</span>
       </div>
-      {% else %}
-      <p class="muted" style="font-size:14px;padding:16px 0">Заказов пока нет</p>
-      {% endfor %}
+      <div class="an2-chart-wrap" id="wrap-total">
+        <svg class="an2-chart" id="chart-total" viewBox="0 0 800 160" preserveAspectRatio="none"></svg>
+        <div class="an2-tip" id="tip-total" hidden></div>
+        <div class="an2-crosshair" id="cross-total" hidden></div>
+      </div>
     </div>
-    <div class="an-donut-wrap">
-      {% if stats.mp_sales %}
-      <svg viewBox="0 0 120 120" class="an-donut" aria-hidden="true">
-        {% set total = stats.mp_sales_total %}
-        {% set colors = ['#4f46e5','#7c3aed','#2563eb','#0891b2'] %}
-        {% set offset_ns = namespace(v=0) %}
-        {% set r = 44 %}
-        {% set circ = 2 * 3.14159 * r %}
-        {% for mp_key, mp_count in stats.mp_sales.items() %}
-          {% set pct = mp_count / total %}
-          {% set dash = pct * circ %}
-          {% set gap = circ - dash %}
-          {% set color = colors[loop.index0 % colors|length] %}
-          <circle cx="60" cy="60" r="{{ r }}"
-            fill="none" stroke="{{ color }}" stroke-width="16"
-            stroke-dasharray="{{ '%.1f' % dash }} {{ '%.1f' % gap }}"
-            stroke-dashoffset="{{ '%.1f' % (circ * (1 - offset_ns.v)) }}"
-            transform="rotate(-90 60 60)"/>
-          {% set offset_ns.v = offset_ns.v + pct %}
-        {% endfor %}
-        <text x="60" y="56" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">{{ stats.total_orders }}</text>
-        <text x="60" y="70" text-anchor="middle" font-size="9" fill="var(--muted)">заказов</text>
-      </svg>
-      {% endif %}
-    </div>
-  </div>
 
-  <!-- Последние продажи -->
-  <div class="an-card an-card--wide">
-    <div class="an-card-head">
-      <span class="an-card-title">Последние продажи</span>
-      <a href="/" class="an-card-link">Каталог →</a>
+    <!-- Малый: Ozon -->
+    <div class="an2-card">
+      <div class="an2-card-head">
+        <span class="an2-card-title">
+          <span class="mp mp-active" style="font-size:11px;padding:2px 7px">OZ</span>
+          Ozon
+        </span>
+        <span class="an2-card-sub" id="chart-ozon-sub">за 30 дней</span>
+      </div>
+      <div class="an2-chart-wrap" id="wrap-ozon">
+        <svg class="an2-chart" id="chart-ozon" viewBox="0 0 400 120" preserveAspectRatio="none"></svg>
+        <div class="an2-tip" id="tip-ozon" hidden></div>
+        <div class="an2-crosshair" id="cross-ozon" hidden></div>
+      </div>
+    </div>
+
+    <!-- Малый: WB -->
+    <div class="an2-card">
+      <div class="an2-card-head">
+        <span class="an2-card-title">
+          <span class="mp mp-active" style="font-size:11px;padding:2px 7px;background:#cb11ab">WB</span>
+          Wildberries
+        </span>
+        <span class="an2-card-sub" id="chart-wb-sub">за 30 дней</span>
+      </div>
+      <div class="an2-chart-wrap" id="wrap-wb">
+        <svg class="an2-chart" id="chart-wb" viewBox="0 0 400 120" preserveAspectRatio="none"></svg>
+        <div class="an2-tip" id="tip-wb" hidden></div>
+        <div class="an2-crosshair" id="cross-wb" hidden></div>
+      </div>
+    </div>
+
+  </div><!-- /charts -->
+
+  <!-- ===== Последние продажи ===== -->
+  <div class="an2-card an2-card--full" style="margin-top:24px">
+    <div class="an2-card-head">
+      <span class="an2-card-title">Последние продажи</span>
+      <a href="/" class="an2-card-link">Каталог →</a>
     </div>
     {% if stats.recent_sales %}
     <div class="table-wrap" style="box-shadow:none;border:none;border-radius:0;margin:0 -24px;width:calc(100% + 48px)">
@@ -180,7 +136,10 @@ history.replaceState(null, '', '/analytics');
           {% if s.author %}<span class="row-sub">{{ s.author }}</span>{% endif %}
         </td>
         <td>
-          <span class="mp mp-active">{{ s.mp_key[:2].upper() if s.mp_key != 'wildberries' else 'WB' }}</span>
+          <span class="mp mp-active"
+            {% if s.mp_key == 'wildberries' %}style="background:#cb11ab"{% endif %}>
+            {{ 'WB' if s.mp_key == 'wildberries' else s.mp_key[:2].upper() }}
+          </span>
           <span style="font-size:13px;color:var(--ink-soft);margin-left:6px">{{ s.marketplace }}</span>
         </td>
         <td style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">
@@ -193,160 +152,332 @@ history.replaceState(null, '', '/analytics');
     </table>
     </div>
     {% else %}
-    <div class="empty-box" style="padding:32px 20px">
+    <div class="empty-box" style="padding:40px 20px">
       <div class="empty-icon">🛒</div>
       <div>Продаж пока не было</div>
     </div>
     {% endif %}
   </div>
 
-  <!-- Топ авторов -->
-  <div class="an-card">
-    <div class="an-card-head">
-      <span class="an-card-title">Топ авторов</span>
-      <span class="muted" style="font-size:13px">по числу продаж</span>
-    </div>
-    {% if stats.top_authors %}
-    <ol class="an-top-list">
-      {% for a in stats.top_authors %}
-      <li class="an-top-item">
-        <span class="an-top-rank">{{ loop.index }}</span>
-        <div class="an-top-body">
-          <div class="an-top-name">{{ a.author }}</div>
-          <div class="an-top-bar-wrap">
-            <div class="an-top-bar" style="width:{{ (a.sales / stats.max_author_sales * 100)|round }}%"></div>
-          </div>
-        </div>
-        <span class="an-top-count badge badge-in_stock">{{ a.sales }}</span>
-      </li>
-      {% endfor %}
-    </ol>
-    {% else %}
-    <p class="muted" style="font-size:14px;padding:16px 0">Данных пока нет</p>
-    {% endif %}
-  </div>
-
-  <!-- Здоровье синхронизации -->
-  <div class="an-card">
-    <div class="an-card-head">
-      <span class="an-card-title">Синхронизация</span>
-      <a href="/log" class="an-card-link">Журнал →</a>
-    </div>
-    <div class="an-health">
-      <div class="an-health-ring-wrap">
-        <svg viewBox="0 0 100 100" class="an-health-ring" aria-hidden="true">
-          <circle cx="50" cy="50" r="40" fill="none" stroke="var(--line)" stroke-width="10"/>
-          <circle cx="50" cy="50" r="40" fill="none"
-            stroke="{% if stats.health_pct >= 95 %}var(--ok){% elif stats.health_pct >= 80 %}var(--warn){% else %}var(--danger){% endif %}"
-            stroke-width="10"
-            stroke-linecap="round"
-            stroke-dasharray="{{ '%.1f' % (stats.health_pct * 2.513) }} 251.3"
-            stroke-dashoffset="62.8"
-            transform="rotate(-90 50 50)"/>
-          <text x="50" y="46" text-anchor="middle" font-size="18" font-weight="700" fill="var(--ink)">{{ stats.health_pct }}%</text>
-          <text x="50" y="60" text-anchor="middle" font-size="9" fill="var(--muted)">успешность</text>
-        </svg>
-      </div>
-      <div class="an-health-stats">
-        <div class="an-health-row">
-          <span class="an-health-dot" style="background:var(--ok)"></span>
-          <span>Успешно за 24ч</span>
-          <strong>{{ stats.total_24h - stats.errors_24h }}</strong>
-        </div>
-        <div class="an-health-row">
-          <span class="an-health-dot" style="background:var(--danger)"></span>
-          <span>Ошибок за 24ч</span>
-          <strong class="{{ 'color-err' if stats.errors_24h else '' }}">{{ stats.errors_24h }}</strong>
-        </div>
-        <div class="an-health-row">
-          <span class="an-health-dot" style="background:var(--muted)"></span>
-          <span>Всего за 24ч</span>
-          <strong>{{ stats.total_24h }}</strong>
-        </div>
-      </div>
-    </div>
-    {% if stats.last_error %}
-    <div class="an-last-error">
-      <span class="an-last-error-label">Последняя ошибка</span>
-      <div class="an-last-error-msg">{{ stats.last_error.message or '—' }}</div>
-      <div class="muted" style="font-size:12px;margin-top:2px">{{ stats.last_error.created_at | msk }}</div>
-    </div>
-    {% endif %}
-  </div>
-
-  <!-- Каталог: статусы -->
-  <div class="an-card">
-    <div class="an-card-head">
-      <span class="an-card-title">Статусы каталога</span>
-      <a href="/" class="an-card-link">Смотреть →</a>
-    </div>
-    {% set status_data = [
-      ('В продаже',  stats.in_stock,       'ok',      '📦'),
-      ('Продано',    stats.sold_total,      'sold',    '✅'),
-      ('Снято',      stats.withdrawn_total, 'muted',   '📭'),
-    ] %}
-    {% set cat_total = stats.total_books if stats.total_books else 1 %}
-    <div class="an-status-list">
-      {% for label, count, cls, icon in status_data %}
-      <div class="an-status-row">
-        <span class="an-status-icon">{{ icon }}</span>
-        <div class="an-status-body">
-          <div class="an-status-top">
-            <span>{{ label }}</span>
-            <strong>{{ count }}</strong>
-          </div>
-          <div class="an-status-bar-wrap">
-            <div class="an-status-bar an-status-bar--{{ cls }}"
-                 style="width:{{ (count / cat_total * 100)|round }}%"></div>
-          </div>
-        </div>
-        <span class="muted" style="font-size:12px;flex-shrink:0">{{ (count / cat_total * 100)|round }}%</span>
-      </div>
-      {% endfor %}
-    </div>
-    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap">
-      <a href="/?status=in_stock" class="btn-secondary" style="font-size:13px;padding:6px 12px;border-radius:8px;text-decoration:none;background:#eef1f6;color:var(--ink-soft);border:1px solid var(--line-strong)">Активные</a>
-      <a href="/?status=sold" class="btn-secondary" style="font-size:13px;padding:6px 12px;border-radius:8px;text-decoration:none;background:#eef1f6;color:var(--ink-soft);border:1px solid var(--line-strong)">Проданные</a>
-      <a href="/?status=withdrawn" class="btn-secondary" style="font-size:13px;padding:6px 12px;border-radius:8px;text-decoration:none;background:#eef1f6;color:var(--ink-soft);border:1px solid var(--line-strong)">Снятые</a>
-    </div>
-  </div>
-
-</div><!-- /an-grid -->
+</div><!-- /an2-page -->
 
 <script>
 (function () {
-  // Tooltip для графика
-  const wrap = document.getElementById("sales-chart-wrap");
-  const tip = document.getElementById("an-tooltip");
-  if (!wrap || !tip) return;
+"use strict";
 
-  function showTip(bar, e) {
-    const label = bar.dataset.label;
-    const count = bar.dataset.count;
-    tip.textContent = label + ": " + count + " продаж" + (count == 1 ? "а" : count < 5 ? "и" : "");
-    tip.hidden = false;
-    positionTip(e);
-  }
-  function positionTip(e) {
-    const rect = wrap.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    tip.style.left = Math.min(x + 12, wrap.offsetWidth - tip.offsetWidth - 8) + "px";
-    tip.style.top = Math.max(y - 36, 4) + "px";
+/* ─── конфиг графиков ─────────────────────────────────────────── */
+var CHARTS = [
+  { id: "total", series: AN.total, vb: [800, 160], color: "#4f46e5", fill: "rgba(79,70,229,.12)", sub: "chart-total-sub" },
+  { id: "ozon",  series: AN.ozon,  vb: [400, 120], color: "#0891b2", fill: "rgba(8,145,178,.12)",  sub: "chart-ozon-sub"  },
+  { id: "wb",    series: AN.wb,    vb: [400, 120], color: "#cb11ab", fill: "rgba(203,17,171,.12)", sub: "chart-wb-sub"   },
+];
+var SVG_NS = "http://www.w3.org/2000/svg";
+var activeDays = 30;
+
+/* ─── вспомогательные ──────────────────────────────────────────── */
+function el(tag, attrs, parent) {
+  var e = document.createElementNS(SVG_NS, tag);
+  Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function pluralSales(n) {
+  var n10 = n % 10, n100 = n % 100;
+  if (n10 === 1 && n100 !== 11) return "продажа";
+  if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) return "продажи";
+  return "продаж";
+}
+
+/* ─── рендер линейного графика ─────────────────────────────────── */
+function renderChart(cfg, days) {
+  var svg    = document.getElementById("chart-" + cfg.id);
+  var tipEl  = document.getElementById("tip-"   + cfg.id);
+  var cross  = document.getElementById("cross-" + cfg.id);
+  var wrap   = document.getElementById("wrap-"  + cfg.id);
+  var subEl  = document.getElementById(cfg.sub);
+  if (!svg) return;
+
+  /* очищаем предыдущий рендер */
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  var W = cfg.vb[0], H = cfg.vb[1];
+  var PAD = { top: 14, right: 8, bottom: 28, left: 36 };
+  var cW = W - PAD.left - PAD.right;
+  var cH = H - PAD.top  - PAD.bottom;
+
+  /* берём последние `days` точек */
+  var raw    = cfg.series.slice(-days);
+  var counts = raw.map(function (d) { return d.count; });
+  var maxVal = Math.max.apply(null, counts);
+  if (maxVal === 0) maxVal = 1;
+
+  /* шкала Y: округляем max вверх красиво */
+  var yTicks = 4;
+  var rawStep = maxVal / yTicks;
+  var mag   = Math.pow(10, Math.floor(Math.log(rawStep) / Math.LN10));
+  var niceStep = Math.ceil(rawStep / mag) * mag || 1;
+  var yMax  = niceStep * yTicks;
+
+  /* фон-полосы и подписи Y */
+  for (var yi = 0; yi <= yTicks; yi++) {
+    var yv  = yi * niceStep;
+    var yPx = PAD.top + cH - (yv / yMax) * cH;
+    el("line", { x1: PAD.left, y1: yPx, x2: W - PAD.right, y2: yPx,
+                 stroke: "var(--line)", "stroke-width": "1",
+                 "stroke-dasharray": yi === 0 ? "none" : "4 4" }, svg);
+    el("text", { x: PAD.left - 6, y: yPx + 4,
+                 "text-anchor": "end", "font-size": "9",
+                 fill: "var(--muted)" }, svg).textContent = yv || "0";
   }
 
-  wrap.addEventListener("mousemove", function (e) {
-    const bar = e.target.closest(".an-bar");
-    if (bar) { showTip(bar, e); } else { tip.hidden = true; }
+  /* подписи X (каждые 5 или 10 дней) */
+  var xStep = days <= 30 ? 5 : 10;
+  raw.forEach(function (d, i) {
+    if (i % xStep === 0 || i === raw.length - 1) {
+      var xPx = PAD.left + (i / Math.max(raw.length - 1, 1)) * cW;
+      el("text", { x: xPx, y: H - 6,
+                   "text-anchor": "middle", "font-size": "9",
+                   fill: "var(--muted)" }, svg).textContent = d.label;
+    }
   });
-  wrap.addEventListener("mouseleave", function () { tip.hidden = true; });
 
-  // Строки таблицы — переход по клику
-  document.querySelectorAll("tr.clickable").forEach(function (row) {
-    row.addEventListener("click", function (e) {
-      if (!e.target.closest("a")) location.href = row.dataset.href;
+  /* точки для полигона */
+  var pts = raw.map(function (d, i) {
+    return [
+      PAD.left + (i / Math.max(raw.length - 1, 1)) * cW,
+      PAD.top  + cH - (d.count / yMax) * cH
+    ];
+  });
+
+  /* сглаженный путь (кубические кривые) */
+  function smoothPath(points) {
+    if (points.length < 2) return "";
+    var d = "M " + points[0][0] + " " + points[0][1];
+    for (var i = 0; i < points.length - 1; i++) {
+      var cp1x = points[i][0]     + (points[i + 1][0] - (i > 0 ? points[i - 1][0] : points[i][0])) / 6;
+      var cp1y = points[i][1]     + (points[i + 1][1] - (i > 0 ? points[i - 1][1] : points[i][1])) / 6;
+      var cp2x = points[i + 1][0] - (i < points.length - 2 ? points[i + 2][0] - points[i][0] : points[i + 1][0] - points[i][0]) / 6;
+      var cp2y = points[i + 1][1] - (i < points.length - 2 ? points[i + 2][1] - points[i][1] : points[i + 1][1] - points[i][1]) / 6;
+      d += " C " + cp1x + " " + cp1y + " " + cp2x + " " + cp2y + " " + points[i + 1][0] + " " + points[i + 1][1];
+    }
+    return d;
+  }
+
+  var linePath = smoothPath(pts);
+
+  /* заливка под графиком */
+  var firstX = pts[0][0], lastX = pts[pts.length - 1][0];
+  var fillPath = linePath +
+    " L " + lastX + " " + (PAD.top + cH) +
+    " L " + firstX + " " + (PAD.top + cH) + " Z";
+  el("path", { d: fillPath, fill: cfg.fill, stroke: "none" }, svg);
+
+  /* линия */
+  el("path", { d: linePath, fill: "none", stroke: cfg.color,
+               "stroke-width": "2.5", "stroke-linecap": "round",
+               "stroke-linejoin": "round" }, svg);
+
+  /* интерактивные точки (невидимые хитзоны) */
+  var dotGroup = el("g", {}, svg);
+  var activeDot = null;
+
+  raw.forEach(function (d, i) {
+    var px = pts[i][0], py = pts[i][1];
+
+    /* кружок-хитзона */
+    var zone = el("circle", { cx: px, cy: py, r: "16",
+                              fill: "transparent", "data-i": i }, dotGroup);
+
+    /* видимая точка (появляется при ховере) */
+    var dot = el("circle", { cx: px, cy: py, r: "4",
+                             fill: "#fff", stroke: cfg.color, "stroke-width": "2",
+                             opacity: "0", "pointer-events": "none" }, dotGroup);
+
+    zone.addEventListener("mouseenter", function () {
+      if (activeDot) activeDot.setAttribute("opacity", "0");
+      dot.setAttribute("opacity", "1");
+      activeDot = dot;
+
+      cross.style.left = (px / W * 100) + "%";
+      cross.hidden = false;
+
+      tipEl.innerHTML =
+        "<strong>" + d.label + "</strong>" +
+        "<span>" + d.count + " " + pluralSales(d.count) + "</span>";
+      tipEl.hidden = false;
+
+      /* позиционирование тултипа */
+      var wRect = wrap.getBoundingClientRect();
+      var dotRect = zone.getBoundingClientRect();
+      var tipLeft = dotRect.left - wRect.left + 8;
+      var tipTop  = dotRect.top  - wRect.top  - tipEl.offsetHeight - 10;
+      if (tipLeft + tipEl.offsetWidth + 8 > wRect.width) {
+        tipLeft = dotRect.left - wRect.left - tipEl.offsetWidth - 8;
+      }
+      tipEl.style.left = Math.max(4, tipLeft) + "px";
+      tipEl.style.top  = Math.max(4, tipTop)  + "px";
+    });
+
+    zone.addEventListener("mouseleave", function () {
+      dot.setAttribute("opacity", "0");
+      activeDot = null;
+      tipEl.hidden = true;
+      cross.hidden = true;
     });
   });
+
+  /* подпись периода */
+  if (subEl) subEl.textContent = "за " + days + " " + (days === 7 ? "дней" : days === 30 ? "дней" : "дней");
+}
+
+/* ─── обновление KPI при смене периода ─────────────────────────── */
+function updateKpi(days) {
+  var k = AN.kpi[days] || AN.kpi[30];
+  var o = document.getElementById("kpi-orders");
+  var c = document.getElementById("kpi-cancels");
+  if (o) o.textContent = k.orders;
+  if (c) c.textContent = k.cancels;
+}
+
+/* ─── переключатель периода ────────────────────────────────────── */
+function setDays(days) {
+  activeDays = days;
+  document.querySelectorAll(".an2-period-btn").forEach(function (btn) {
+    btn.classList.toggle("an2-period-btn--active", +btn.dataset.days === days);
+  });
+  CHARTS.forEach(function (cfg) { renderChart(cfg, days); });
+  updateKpi(days);
+}
+
+document.querySelectorAll(".an2-period-btn").forEach(function (btn) {
+  btn.addEventListener("click", function () { setDays(+btn.dataset.days); });
+});
+
+/* ─── переход по строке таблицы ───────────────────────────────── */
+document.querySelectorAll("tr.clickable").forEach(function (row) {
+  row.addEventListener("click", function (e) {
+    if (!e.target.closest("a")) location.href = row.dataset.href;
+  });
+});
+
+/* ─── первый рендер ─────────────────────────────────────────────── */
+CHARTS.forEach(function (cfg) { renderChart(cfg, activeDays); });
+
 })();
 </script>
+
+<style>
+/* ─── Страница ──────────────────────────────────────────────────── */
+.an2-page { padding: 0 0 40px; }
+
+.an2-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; gap: 16px;
+  margin-bottom: 28px;
+}
+.an2-title { font-size: 26px; font-weight: 800; margin: 0; letter-spacing: -.02em; }
+.an2-sub   { color: var(--muted); font-size: 14px; margin: 2px 0 0; }
+
+/* ─── Переключатель периода ─────────────────────────────────────── */
+.an2-period {
+  display: flex; gap: 4px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 4px;
+}
+.an2-period-btn {
+  border: none; background: none; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--ink-soft);
+  padding: 6px 14px; border-radius: 7px;
+  transition: background .15s, color .15s, box-shadow .15s;
+}
+.an2-period-btn:hover { color: var(--ink); background: var(--line); }
+.an2-period-btn--active {
+  background: var(--surface); color: var(--accent);
+  box-shadow: 0 1px 4px rgba(79,70,229,.18);
+}
+
+/* ─── KPI ───────────────────────────────────────────────────────── */
+.an2-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px; margin-bottom: 24px;
+}
+.an2-kpi {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 18px 20px 16px;
+  box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; gap: 4px;
+  transition: box-shadow .18s, transform .18s;
+}
+.an2-kpi:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.an2-kpi-icon { font-size: 20px; margin-bottom: 4px; }
+.an2-kpi-val  { font-size: 28px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.an2-kpi-label{ font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 2px; }
+
+.an2-kpi--accent .an2-kpi-val { color: var(--accent); }
+.an2-kpi--red    .an2-kpi-val { color: var(--danger); }
+.an2-kpi--green  .an2-kpi-val { color: var(--ok); }
+.an2-kpi--purple .an2-kpi-val { color: #7c3aed; }
+.an2-kpi--ink    .an2-kpi-val { color: var(--ink); }
+
+/* ─── Сетка графиков ────────────────────────────────────────────── */
+.an2-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+  gap: 16px;
+}
+.an2-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 20px 24px 16px;
+  box-shadow: var(--shadow-sm);
+}
+.an2-card--wide { grid-column: 1 / -1; }
+.an2-card--full { grid-column: 1 / -1; }
+
+.an2-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.an2-card-title { font-size: 15px; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+.an2-card-sub   { font-size: 12px; color: var(--muted); }
+.an2-card-link  { font-size: 13px; color: var(--accent); font-weight: 600; }
+
+/* ─── Контейнер графика ─────────────────────────────────────────── */
+.an2-chart-wrap {
+  position: relative;
+  height: 160px;
+}
+.an2-card:not(.an2-card--wide) .an2-chart-wrap { height: 120px; }
+
+.an2-chart {
+  width: 100%; height: 100%;
+  display: block; overflow: visible;
+}
+
+/* ─── Крестик-курсор ────────────────────────────────────────────── */
+.an2-crosshair {
+  position: absolute; top: 14px; bottom: 28px;
+  width: 1px; background: var(--line-strong);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+/* ─── Тултип ────────────────────────────────────────────────────── */
+.an2-tip {
+  position: absolute;
+  background: var(--ink); color: #fff;
+  border-radius: 8px; padding: 7px 12px;
+  font-size: 13px; pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  display: flex; flex-direction: column; gap: 1px;
+  z-index: 10;
+  animation: tip-in .1s ease;
+}
+.an2-tip strong { font-size: 11px; opacity: .7; font-weight: 500; }
+.an2-tip span   { font-size: 14px; font-weight: 700; }
+@keyframes tip-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+</style>
 {% endblock %}
