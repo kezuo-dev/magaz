@@ -105,10 +105,14 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
 
     deleted = 0
     failed = 0
+    skipped = 0  # не обработали из-за лимита (попробуем в следующий раз)
 
-    # Удаляем небольшими пачками с паузами (чтобы не схлопнуть лимит 429)
-    BATCH_SIZE = 20
-    PAUSE_SECONDS = 2
+    # Удаляем небольшими пачками с паузами.
+    # WB лимитирует этот эндпоинт жёстко: при 429 НЕ пробуем повторно и НЕ
+    # разбиваем на единичные запросы — это только удваивает нагрузку. Просто
+    # останавливаемся: остаток обработает следующий ночной запуск.
+    BATCH_SIZE = 5
+    PAUSE_SECONDS = 5
 
     for i in range(0, len(to_delete), BATCH_SIZE):
         batch = to_delete[i:i + BATCH_SIZE]
@@ -124,26 +128,27 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
                 _log(db, action="wb_trash", ok=True, book_id=book.id,
                      message=f"Карточка {nm} удалена в корзину WB")
         except MarketplaceError as exc:
-            # Вся пачка не прошла — пробуем по одной
+            err = str(exc)
+            # 429 — лимит. Останавливаемся, не множим запросы.
+            if "429" in err or "лимит" in err.lower():
+                skipped = len(to_delete) - i
+                _log(db, action="wb_trash", ok=False,
+                     message=f"Лимит WB: остановились после {deleted} удалений, "
+                             f"отложено {skipped} карточек на следующий запуск")
+                break
+            # Другая ошибка — пишем и идём дальше
             for book, listing, nm in batch:
-                try:
-                    client._post(
-                        "https://content-api.wildberries.ru/content/v2/cards/delete/trash",
-                        {"nmIDs": [nm]},
-                    )
-                    deleted += 1
-                    _log(db, action="wb_trash", ok=True, book_id=book.id,
-                         message=f"Карточка {nm} удалена в корзину WB")
-                except MarketplaceError as e:
-                    failed += 1
-                    _log(db, action="wb_trash", ok=False, book_id=book.id,
-                         message=f"Не удалось удалить карточку {nm} в корзину WB: {e}")
+                failed += 1
+                _log(db, action="wb_trash", ok=False, book_id=book.id,
+                     message=f"Не удалось удалить карточку {nm} в корзину WB: {exc}")
 
         # Пауза между пачками (кроме последней)
         if i + BATCH_SIZE < len(to_delete):
             time.sleep(PAUSE_SECONDS)
 
-    _log(db, action="wb_trash", ok=failed == 0,
-         message=f"Очистка корзины WB ({period_label}): обработано {len(to_delete)}, удалено {deleted}, не удалось {failed}")
+    _log(db, action="wb_trash", ok=(failed == 0 and skipped == 0),
+         message=f"Очистка корзины WB ({period_label}): обработано {len(to_delete)}, удалено {deleted}"
+                 + (f", не удалось {failed}" if failed else "")
+                 + (f", отложено {skipped}" if skipped else ""))
 
-    return {"processed": len(to_delete), "deleted": deleted, "failed": failed}
+    return {"processed": len(to_delete), "deleted": deleted, "failed": failed, "skipped": skipped}
