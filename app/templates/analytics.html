@@ -20,15 +20,14 @@ var AN = {
 
   <!-- ===== Шапка ===== -->
   <div class="an2-header">
-    <div>
+    <div class="an2-header-left">
+      <div class="an2-eyebrow">Мониторинг продаж</div>
       <h1 class="an2-title">Аналитика</h1>
-      <p class="an2-sub">Продажи и заказы</p>
-      <div class="live-bar" style="margin-top:4px">
+      <div class="live-bar" style="margin-top:6px">
         <span class="live-dot" title="Данные обновляются автоматически"></span>
         <span class="live-bar-time"></span>
       </div>
     </div>
-    <!-- Переключатель периода -->
     <div class="an2-period" id="an2-period">
       <button class="an2-period-btn an2-period-btn--active" data-days="7">7 дней</button>
       <button class="an2-period-btn" data-days="30">30 дней</button>
@@ -39,27 +38,22 @@ var AN = {
   <!-- ===== KPI ===== -->
   <div class="an2-kpi-row" id="an2-kpi">
     <div class="an2-kpi an2-kpi--accent">
-      <div class="an2-kpi-icon">🛒</div>
       <div class="an2-kpi-val" id="kpi-orders">{{ stats.orders_7d }}</div>
-      <div class="an2-kpi-label">Продаж</div>
+      <div class="an2-kpi-label">Продаж за период</div>
     </div>
     <div class="an2-kpi an2-kpi--red">
-      <div class="an2-kpi-icon">↩️</div>
       <div class="an2-kpi-val" id="kpi-cancels">{{ stats.cancellations_7d }}</div>
-      <div class="an2-kpi-label">Отмен</div>
+      <div class="an2-kpi-label">Отмен за период</div>
     </div>
     <div class="an2-kpi an2-kpi--green">
-      <div class="an2-kpi-icon">📦</div>
       <div class="an2-kpi-val" id="kpi-in-stock">{{ stats.in_stock }}</div>
-      <div class="an2-kpi-label">В продаже</div>
+      <div class="an2-kpi-label">В продаже сейчас</div>
     </div>
     <div class="an2-kpi an2-kpi--purple">
-      <div class="an2-kpi-icon">✅</div>
       <div class="an2-kpi-val" id="kpi-sold-total">{{ stats.sold_total }}</div>
       <div class="an2-kpi-label">Всего продано</div>
     </div>
     <div class="an2-kpi an2-kpi--ink">
-      <div class="an2-kpi-icon">📚</div>
       <div class="an2-kpi-val" id="kpi-total-books">{{ stats.total_books }}</div>
       <div class="an2-kpi-label">Книг в каталоге</div>
     </div>
@@ -526,54 +520,77 @@ window.addEventListener("resize", function () {
 /* ─── Страница ──────────────────────────────────────────────────── */
 .an2-page { padding: 0 0 40px; }
 
+/* ─── Шапка-баннер ──────────────────────────────────────────────── */
 .an2-header {
-  display: flex; align-items: flex-start; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 16px;
-  margin-bottom: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
 }
-.an2-title { font-size: 26px; font-weight: 800; margin: 0; letter-spacing: -.02em; }
-.an2-sub   { color: var(--muted); font-size: 14px; margin: 2px 0 0; }
+.an2-header-left { display: flex; flex-direction: column; gap: 2px; }
+.an2-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--accent); opacity: .8;
+}
+.an2-title {
+  font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -.02em;
+  color: var(--ink);
+}
 
 /* ─── Переключатель периода ─────────────────────────────────────── */
 .an2-period {
-  display: flex; gap: 4px;
+  display: flex; gap: 3px;
   background: var(--surface-2); border: 1px solid var(--line);
-  border-radius: 10px; padding: 4px;
+  border-radius: 10px; padding: 3px;
 }
 .an2-period-btn {
   border: none; background: none; cursor: pointer;
   font-size: 13px; font-weight: 600; color: var(--ink-soft);
-  padding: 6px 14px; border-radius: 7px;
+  padding: 6px 16px; border-radius: 8px;
   transition: background .15s, color .15s, box-shadow .15s;
 }
-.an2-period-btn:hover { color: var(--ink); background: var(--line); }
+.an2-period-btn:hover { color: var(--ink); background: var(--line); box-shadow: none; }
 .an2-period-btn--active {
-  background: var(--surface); color: var(--accent);
-  box-shadow: 0 1px 4px rgba(79,70,229,.18);
+  background: var(--accent); color: #fff;
+  box-shadow: 0 2px 8px rgba(79,70,229,.30);
 }
+.an2-period-btn--active:hover { background: var(--accent-strong); color: #fff; }
 
 /* ─── KPI ───────────────────────────────────────────────────────── */
 .an2-kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 14px; margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 12px; margin-bottom: 20px;
 }
 .an2-kpi {
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 18px 20px 16px;
+  border-bottom: 3px solid var(--line-strong);
+  border-radius: var(--radius); padding: 18px 20px 14px;
   box-shadow: var(--shadow-sm);
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 6px;
   transition: box-shadow .18s, transform .18s;
 }
 .an2-kpi:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
-.an2-kpi-icon { font-size: 20px; margin-bottom: 4px; }
-.an2-kpi-val  { font-size: 28px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
-.an2-kpi-label{ font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 2px; }
+.an2-kpi-val  {
+  font-size: 32px; font-weight: 800; letter-spacing: -.04em;
+  line-height: 1; font-variant-numeric: tabular-nums;
+}
+.an2-kpi-label { font-size: 12px; color: var(--muted); font-weight: 500; }
 
+.an2-kpi--accent { border-bottom-color: var(--accent); }
 .an2-kpi--accent .an2-kpi-val { color: var(--accent); }
+.an2-kpi--red    { border-bottom-color: var(--danger); }
 .an2-kpi--red    .an2-kpi-val { color: var(--danger); }
+.an2-kpi--green  { border-bottom-color: var(--ok); }
 .an2-kpi--green  .an2-kpi-val { color: var(--ok); }
+.an2-kpi--purple { border-bottom-color: #7c3aed; }
 .an2-kpi--purple .an2-kpi-val { color: #7c3aed; }
+.an2-kpi--ink    { border-bottom-color: var(--ink-soft); }
 .an2-kpi--ink    .an2-kpi-val { color: var(--ink); }
 
 /* ─── Сетка графиков ────────────────────────────────────────────── */
@@ -606,11 +623,7 @@ window.addEventListener("resize", function () {
   overflow: hidden;
 }
 .an2-card:not(.an2-card--wide) .an2-chart-wrap { height: 160px; }
-
-.an2-chart {
-  width: 100%; height: 100%;
-  display: block;
-}
+.an2-chart { width: 100%; height: 100%; display: block; }
 
 /* ─── Тултип ────────────────────────────────────────────────────── */
 .an2-tip {
