@@ -7,11 +7,14 @@
   sessionStorage.removeItem('an_token');
   {% else %}
   var t = sessionStorage.getItem('an_token');
-  if (t) { window.location.replace('/analytics?t=' + t); }
+  if (t) { window.location.replace('/analytics?t=' + t); return; }
   {% endif %}
+  // Токена нет — показываем форму (по умолчанию скрыта, чтобы не мигать при редиректе)
+  var w = document.getElementById('an-stub-wrap');
+  if (w) w.style.display = '';
 })();
 </script>
-<div class="an-stub-wrap">
+<div class="an-stub-wrap" id="an-stub-wrap" style="display:none">
   <div class="an-stub-card">
 
     <!-- Котик работающий -->
