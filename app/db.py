@@ -1,5 +1,5 @@
 """Подключение к базе. SQLite локально, PostgreSQL на проде — разница только в DATABASE_URL."""
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
@@ -10,6 +10,21 @@ if settings.database_url.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 
 engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
+
+# WAL-режим для SQLite: читатели не блокируют писателей и наоборот.
+# Без него планировщик (сверка каталога, опрос заказов) держал эксклюзивную
+# блокировку на весь файл — каждый HTTP-запрос в этот момент висел.
+# busy_timeout уже выставлен в 5 сек через connect_args ниже — на случай
+# одновременной записи двух фоновых задач.
+if settings.database_url.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")   # быстрее DELETE, безопасно с WAL
+        cur.execute("PRAGMA cache_size=-8000")     # 8 МБ кэша вместо 2 МБ
+        cur.execute("PRAGMA busy_timeout=5000")    # ждать до 5 сек вместо сразу упасть
+        cur.close()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
