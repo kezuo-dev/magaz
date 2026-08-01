@@ -186,8 +186,18 @@
     <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
     <div class="modal-icon">🗑️</div>
     <h2 id="wb-trash-title">Очистить корзину WB?</h2>
-    <p class="muted">Программа пройдёт по всем снятым книгам с лотом Wildberries и удалит карточки в корзину небольшими пачками. Это может занять некоторое время.</p>
+    <p class="muted">Программа удалит снятые карточки в корзину Wildberries небольшими пачками. Выберите период — книги, снятые раньше указанного срока, не будут обработаны.</p>
     <form method="post" action="/catalog/wb_trash" class="modal-form js-loading-form">
+      <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem;">
+        <span>Снятые за последние</span>
+        <select name="days" style="width:auto;">
+          <option value="7">7 дней</option>
+          <option value="30">30 дней</option>
+          <option value="90" selected>90 дней</option>
+          <option value="365">год</option>
+          <option value="0">всё время</option>
+        </select>
+      </label>
       <div class="modal-actions">
         <button type="button" class="secondary" data-close>Отмена</button>
         <button type="submit" data-loading-text="Удаляем в корзину…">Очистить</button>

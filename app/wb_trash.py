@@ -1,12 +1,13 @@
 """Удаление снятых книг в корзину WB.
 
-Проходит по всем книгам со статусом SOLD/WITHDRAWN, у которых есть лот WB с
+Проходит по книгам со статусом SOLD/WITHDRAWN, у которых есть лот WB с
 остатком 0, и удаляет карточки в корзину небольшими пачками с паузами (чтобы не
 схлопнуть лимит API 429). Вызывается по кнопке из UI или по расписанию.
 """
 from __future__ import annotations
 
 import time
+from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -27,8 +28,13 @@ def _log(db: Session, *, action, ok, message, book_id=None) -> None:
     )
 
 
-def move_withdrawn_to_trash(db: Session) -> dict:
-    """Удалить снятые книги в корзину WB. Возвращает {processed, deleted, failed}."""
+def move_withdrawn_to_trash(db: Session, days: int | None = 90) -> dict:
+    """Удалить снятые книги в корзину WB. Возвращает {processed, deleted, failed}.
+
+    days — ограничение по периоду: обрабатываем книги, обновлённые за последние
+    N дней. None = без ограничения (все снятые книги за всё время).
+    По умолчанию 90 дней — свежие снятия, не обрабатываем всю историю за раз.
+    """
     # Проверяем настройки WB
     account = db.scalar(
         select(MarketplaceAccount).where(MarketplaceAccount.marketplace == "wildberries")
@@ -46,19 +52,26 @@ def move_withdrawn_to_trash(db: Session) -> dict:
              message=f"Не удалось подключиться к WB: {exc}")
         return {"processed": 0, "deleted": 0, "failed": 0}
 
-    # Находим снятые книги с лотом WB (любой статус лота, главное чтобы книга снята)
-    books = db.scalars(
+    # Находим снятые книги с лотом WB
+    query = (
         select(Book)
         .options(selectinload(Book.listings))
         .where(
             Book.status.in_([BookStatus.SOLD, BookStatus.WITHDRAWN]),
             Book.listings.any(Listing.marketplace == "wildberries"),
         )
-    ).all()
+    )
+    if days is not None:
+        cutoff = utcnow() - timedelta(days=days)
+        query = query.where(Book.updated_at >= cutoff)
+
+    books = db.scalars(query).all()
+
+    period_label = f"за последние {days} дн." if days else "за всё время"
 
     if not books:
         _log(db, action="wb_trash", ok=True,
-             message="Очистка корзины WB: снятых книг для удаления нет")
+             message=f"Очистка корзины WB ({period_label}): снятых книг для удаления нет")
         return {"processed": 0, "deleted": 0, "failed": 0}
 
     # Собираем nmID карточек для удаления
@@ -76,7 +89,7 @@ def move_withdrawn_to_trash(db: Session) -> dict:
 
     if not to_delete:
         _log(db, action="wb_trash", ok=True,
-             message=f"Очистка корзины WB: у {len(books)} книг нет nmID для удаления")
+             message=f"Очистка корзины WB ({period_label}): у {len(books)} книг нет nmID для удаления")
         return {"processed": 0, "deleted": 0, "failed": 0}
 
     deleted = 0
@@ -95,7 +108,6 @@ def move_withdrawn_to_trash(db: Session) -> dict:
                 "https://content-api.wildberries.ru/content/v2/cards/delete/trash",
                 {"nmIDs": nm_ids},
             )
-            # Успешно удалили всю пачку
             for book, listing, nm in batch:
                 deleted += 1
                 _log(db, action="wb_trash", ok=True, book_id=book.id,
@@ -121,6 +133,6 @@ def move_withdrawn_to_trash(db: Session) -> dict:
             time.sleep(PAUSE_SECONDS)
 
     _log(db, action="wb_trash", ok=failed == 0,
-         message=f"Очистка корзины WB: обработано {len(to_delete)}, удалено {deleted}, не удалось {failed}")
+         message=f"Очистка корзины WB ({period_label}): обработано {len(to_delete)}, удалено {deleted}, не удалось {failed}")
 
     return {"processed": len(to_delete), "deleted": deleted, "failed": failed}

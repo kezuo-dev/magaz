@@ -358,13 +358,13 @@ def reconcile_withdrawn(db: Session = Depends(get_db)):
 
 
 @router.post("/catalog/wb_trash")
-def wb_trash(db: Session = Depends(get_db)):
+def wb_trash(db: Session = Depends(get_db), days: int = Form(90)):
     """Кнопка «Очистить корзину WB»: удалить снятые книги в корзину Wildberries.
 
-    Проходит по всем снятым книгам с лотом WB, собирает nmID и удаляет карточки
-    небольшими пачками с паузами (чтобы не схлопнуть лимит API 429).
+    Принимает параметр days — период в днях (0 = все книги за всё время).
     """
-    result = move_withdrawn_to_trash(db)
+    days_arg = None if days <= 0 else days
+    result = move_withdrawn_to_trash(db, days=days_arg)
     db.commit()
 
     processed = result.get("processed", 0)
@@ -380,4 +380,5 @@ def wb_trash(db: Session = Depends(get_db)):
 
     from urllib.parse import quote
     return RedirectResponse("/?synced=" + quote(message), status_code=303)
+
 
