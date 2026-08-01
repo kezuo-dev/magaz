@@ -1,6 +1,7 @@
 """Страница аналитики: продажи, заказы, здоровье синхронизации."""
 from __future__ import annotations
 
+import secrets
 from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -13,6 +14,24 @@ from app.models import Book, BookStatus, Order, SyncLog, utcnow
 from app.templating import marketplace_label, templates
 
 router = APIRouter(prefix="/analytics")
+
+# Токены доступа к аналитике. Живут в серверной сессии, но браузер хранит их
+# в sessionStorage — то есть каждая новая вкладка снова спрашивает пароль.
+_MAX_TOKENS = 10
+
+
+def _issue_token(request: Request) -> str:
+    token = secrets.token_urlsafe(16)
+    tokens = request.session.get("analytics_tokens") or []
+    tokens.append(token)
+    request.session["analytics_tokens"] = tokens[-_MAX_TOKENS:]
+    return token
+
+
+def _token_ok(request: Request, token: str | None) -> bool:
+    if not token:
+        return False
+    return token in (request.session.get("analytics_tokens") or [])
 
 
 def _build_stats(db: Session) -> dict:
@@ -152,26 +171,32 @@ def _build_stats(db: Session) -> dict:
 
 
 @router.get("", response_class=HTMLResponse)
-def analytics_page(request: Request, db: Session = Depends(get_db)):
-    if request.session.get("analytics_unlocked"):
+def analytics_page(request: Request, t: str | None = None, db: Session = Depends(get_db)):
+    if _token_ok(request, t):
         stats = _build_stats(db)
-        return templates.TemplateResponse(request, "analytics.html", {"stats": stats})
-    return templates.TemplateResponse(request, "analytics_stub.html", {"error": None})
+        return templates.TemplateResponse(request, "analytics.html", {"stats": stats, "token": t})
+    # Токена нет или он чужой/устарел — просим пароль.
+    # stale=True говорит шаблону вычистить негодный токен из sessionStorage.
+    return templates.TemplateResponse(
+        request, "analytics_stub.html", {"error": None, "stale": bool(t)}
+    )
 
 
 @router.post("", response_class=HTMLResponse)
 def analytics_unlock(request: Request, password: str = Form(...)):
     from app.config import settings
     if password == settings.analytics_password:
-        request.session["analytics_unlocked"] = True
-        return RedirectResponse("/analytics", status_code=303)
-    return templates.TemplateResponse(request, "analytics_stub.html", {"error": "Неверный пароль"})
+        token = _issue_token(request)
+        return RedirectResponse(f"/analytics?t={token}", status_code=303)
+    return templates.TemplateResponse(
+        request, "analytics_stub.html", {"error": "Неверный пароль", "stale": True}
+    )
 
 
 @router.get("/api")
-def analytics_api(request: Request, db: Session = Depends(get_db)):
+def analytics_api(request: Request, t: str | None = None, db: Session = Depends(get_db)):
     """JSON-снимок для будущего авто-обновления."""
-    if not request.session.get("analytics_unlocked"):
+    if not _token_ok(request, t):
         from fastapi.responses import Response
         return Response(status_code=403)
     stats = _build_stats(db)

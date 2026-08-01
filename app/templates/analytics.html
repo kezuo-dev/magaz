@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Аналитика — Букинист{% endblock %}
 {% block content %}
+<script>
+(function(){
+  var t = {{ token | tojson }};
+  if (t) {
+    sessionStorage.setItem('an_token', t);
+    // убираем ?t=... из адресной строки
+    history.replaceState(null, '', '/analytics');
+  }
+})();
+</script>
 <div class="page-head">
   <div>
     <h1>Аналитика</h1>
