@@ -137,7 +137,7 @@ var AN = {
         </td>
         <td>
           <span class="mp mp-active"
-            {% if s.mp_key == 'wildberries' %}style="background:#cb11ab"{% endif %}>
+            {% if s.mp_key == 'wildberries' %}style="background:#cb11ab;color:#fff"{% endif %}>
             {{ 'WB' if s.mp_key == 'wildberries' else s.mp_key[:2].upper() }}
           </span>
           <span style="font-size:13px;color:var(--ink-soft);margin-left:6px">{{ s.marketplace }}</span>
@@ -341,16 +341,14 @@ function renderChart(cfg, days) {
     tipEl.innerHTML =
       "<strong>" + d.label + "</strong>" +
       "<span>" + d.count + " " + plural(d.count) + "</span>";
-    tipEl.hidden = false;
+    tipEl.style.display = "flex";
 
     /* позиция тултипа */
     var wR = wrap.getBoundingClientRect();
-    /* getBoundingClientRect на SVG-элементе */
     var svgR = svg.getBoundingClientRect();
     var dotX = svgR.left + p[0] * (svgR.width  / W) - wR.left;
     var dotY = svgR.top  + p[1] * (svgR.height / H) - wR.top;
 
-    tipEl.style.display = "flex";
     var tW = tipEl.offsetWidth, tH = tipEl.offsetHeight;
     var left = dotX + 12;
     var top  = dotY - tH - 10;
@@ -363,7 +361,7 @@ function renderChart(cfg, days) {
   function hide() {
     hoverDot.setAttribute("opacity", "0");
     vline.setAttribute("opacity", "0");
-    tipEl.hidden = true;
+    tipEl.style.display = "none";
   }
 
   svg.addEventListener("mousemove", function (e) {
@@ -517,6 +515,7 @@ window.addEventListener("resize", function () {
 .an2-chart-wrap {
   position: relative;
   height: 200px;
+  overflow: hidden;
 }
 .an2-card:not(.an2-card--wide) .an2-chart-wrap { height: 160px; }
 
