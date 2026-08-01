@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import timedelta, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -153,13 +153,27 @@ def _build_stats(db: Session) -> dict:
 
 @router.get("", response_class=HTMLResponse)
 def analytics_page(request: Request, db: Session = Depends(get_db)):
-    stats = _build_stats(db)
-    return templates.TemplateResponse(request, "analytics.html", {"stats": stats})
+    if request.session.get("analytics_unlocked"):
+        stats = _build_stats(db)
+        return templates.TemplateResponse(request, "analytics.html", {"stats": stats})
+    return templates.TemplateResponse(request, "analytics_stub.html", {"error": None})
+
+
+@router.post("", response_class=HTMLResponse)
+def analytics_unlock(request: Request, password: str = Form(...)):
+    from app.config import settings
+    if password == settings.analytics_password:
+        request.session["analytics_unlocked"] = True
+        return RedirectResponse("/analytics", status_code=303)
+    return templates.TemplateResponse(request, "analytics_stub.html", {"error": "Неверный пароль"})
 
 
 @router.get("/api")
-def analytics_api(db: Session = Depends(get_db)):
+def analytics_api(request: Request, db: Session = Depends(get_db)):
     """JSON-снимок для будущего авто-обновления."""
+    if not request.session.get("analytics_unlocked"):
+        from fastapi.responses import Response
+        return Response(status_code=403)
     stats = _build_stats(db)
     return JSONResponse({
         "orders_7d": stats["orders_7d"],
