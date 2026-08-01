@@ -244,7 +244,8 @@ def api_books(
                 # в списке лишь путал бы («OZ снято» у книги, которой на Ozon нет).
                 "listings": [
                     {"short": marketplace_short(l.marketplace), "status": l.status,
-                     "status_label": listing_status_label(l.status)}
+                     "status_label": listing_status_label(l.status),
+                     "marketplace": l.marketplace}
                     for l in sort_listings(b.listings)
                     if l.status == ListingStatus.ACTIVE
                 ],

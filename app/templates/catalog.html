@@ -98,7 +98,7 @@
         </td>
         <td class="mp-cells">
           {% for l in sort_listings(book.listings) if l.status == 'active' %}
-          <span class="mp mp-{{ l.status }}" title="{{ marketplace_label(l.marketplace) }}: {{ listing_status_label(l.status) }}">{{ marketplace_short(l.marketplace) }}</span>
+          <span class="mp mp-{{ l.status }} {% if l.marketplace == 'ozon' %}mp-ozon{% elif l.marketplace == 'wildberries' %}mp-wb{% endif %}" title="{{ marketplace_label(l.marketplace) }}: {{ listing_status_label(l.status) }}">{{ marketplace_short(l.marketplace) }}</span>
           {% else %}
           <span class="muted">—</span>
           {% endfor %}
@@ -405,7 +405,7 @@
       body.innerHTML = items.map(function (b) {
         const mps = b.listings.length
           ? b.listings.filter(l => l.status === 'active').map(l =>
-              '<span class="mp mp-' + esc(l.status) + '" title="' + esc(l.status_label) + '">' + esc(l.short) + '</span>'
+              '<span class="mp mp-' + esc(l.status) + (l.marketplace === 'ozon' ? ' mp-ozon' : l.marketplace === 'wildberries' ? ' mp-wb' : '') + '" title="' + esc(l.status_label) + '">' + esc(l.short) + '</span>'
             ).join("") || '<span class="muted">—</span>'
           : '<span class="muted">—</span>';
         const author = b.author ? '<span class="row-sub">' + esc(b.author) + '</span>' : '';

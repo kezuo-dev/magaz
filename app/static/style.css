@@ -275,6 +275,8 @@ th.col-price { text-align: right; }
 }
 .mp + .mp { margin-left: 5px; }
 .mp-active { background: var(--ok-soft); color: var(--ok); }
+.mp-active.mp-ozon { background: #e8f0ff; color: #005bff; }
+.mp-active.mp-wb   { background: #fce8f9; color: #cb11ab; }
 .mp-error { background: var(--danger-soft); color: var(--danger); }
 .mp-withdrawing, .mp-pending { background: var(--warn-soft); color: var(--warn); }
 .mp-withdrawn { background: #eef1f6; color: var(--muted); }
