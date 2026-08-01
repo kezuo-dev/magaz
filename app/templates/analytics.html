@@ -23,6 +23,10 @@ var AN = {
     <div>
       <h1 class="an2-title">Аналитика</h1>
       <p class="an2-sub">Продажи и заказы</p>
+      <div class="live-bar" style="margin-top:4px">
+        <span class="live-dot" title="Данные обновляются автоматически"></span>
+        <span class="live-bar-time"></span>
+      </div>
     </div>
     <!-- Переключатель периода -->
     <div class="an2-period" id="an2-period">
@@ -46,17 +50,17 @@ var AN = {
     </div>
     <div class="an2-kpi an2-kpi--green">
       <div class="an2-kpi-icon">📦</div>
-      <div class="an2-kpi-val">{{ stats.in_stock }}</div>
+      <div class="an2-kpi-val" id="kpi-in-stock">{{ stats.in_stock }}</div>
       <div class="an2-kpi-label">В продаже</div>
     </div>
     <div class="an2-kpi an2-kpi--purple">
       <div class="an2-kpi-icon">✅</div>
-      <div class="an2-kpi-val">{{ stats.sold_total }}</div>
+      <div class="an2-kpi-val" id="kpi-sold-total">{{ stats.sold_total }}</div>
       <div class="an2-kpi-label">Всего продано</div>
     </div>
     <div class="an2-kpi an2-kpi--ink">
       <div class="an2-kpi-icon">📚</div>
-      <div class="an2-kpi-val">{{ stats.total_books }}</div>
+      <div class="an2-kpi-val" id="kpi-total-books">{{ stats.total_books }}</div>
       <div class="an2-kpi-label">Книг в каталоге</div>
     </div>
   </div>
@@ -449,6 +453,67 @@ window.addEventListener("resize", function () {
     CHARTS.forEach(function (cfg) { renderChart(cfg, activeDays); });
   }, 120);
 });
+
+/* ── Живые обновления KPI и графиков ────────────────────────────── */
+(function () {
+  var timeEl = document.querySelector(".live-bar-time");
+
+  function bump(el) {
+    if (!el) return;
+    el.classList.remove("num-bump"); void el.offsetWidth; el.classList.add("num-bump");
+  }
+
+  function setKpiVal(id, val) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (parseInt(el.textContent, 10) === val) return;
+    el.textContent = val;
+    bump(el);
+  }
+
+  function tick() {
+    fetch("/api/live/analytics")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || d.error) return;
+
+        // Обновляем AN с новыми данными
+        AN.total = d.total_series;
+        AN.ozon  = d.ozon_series;
+        AN.wb    = d.wb_series;
+        AN.kpi   = {
+          7:  { orders: d.orders_7d,  cancels: d.cancellations_7d  },
+          30: { orders: d.orders_30d, cancels: d.cancellations_30d },
+          90: { orders: d.orders_90d, cancels: d.cancellations_90d },
+        };
+
+        // KPI-числа (для тех, что не зависят от периода)
+        setKpiVal("kpi-in-stock",   d.in_stock);
+        setKpiVal("kpi-sold-total", d.sold_total);
+        setKpiVal("kpi-total-books",d.total_books);
+
+        // KPI за текущий период (заказы/отмены)
+        updateKpi(activeDays);
+        bump(document.getElementById("kpi-orders"));
+        bump(document.getElementById("kpi-cancels"));
+
+        // Перерисуем графики
+        CHARTS.forEach(function (cfg) { renderChart(cfg, activeDays); });
+
+        if (timeEl) {
+          var now = new Date();
+          timeEl.textContent = "обновлено " + now.toLocaleTimeString("ru-RU", {
+            hour: "2-digit", minute: "2-digit", second: "2-digit"
+          });
+        }
+      })
+      .catch(function () {});
+  }
+
+  setInterval(function () { if (!document.hidden) tick(); }, 30000); // каждые 30 сек
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) tick(); });
+  setTimeout(tick, 10000); // первый опрос через 10 сек
+})();
 
 })();
 </script>

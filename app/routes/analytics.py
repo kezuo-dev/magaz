@@ -137,8 +137,10 @@ def analytics_page(request: Request):
 def analytics_unlock(request: Request, password: str = Form(...), db: Session = Depends(get_db)):
     from app.config import settings
     if password == settings.analytics_password:
+        request.session["analytics_unlocked"] = True
         stats = _build_stats(db)
         return templates.TemplateResponse(request, "analytics.html", {"stats": stats})
+    request.session.pop("analytics_unlocked", None)
     return templates.TemplateResponse(
         request, "analytics_stub.html", {"error": "Неверный пароль"}
     )

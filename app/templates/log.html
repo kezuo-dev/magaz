@@ -3,6 +3,10 @@
 <div class="page-head">
   <div>
     <h1>Журнал синхронизации</h1>
+    <div class="live-bar" style="margin-top:4px">
+      <span class="live-dot" title="Новые записи появляются автоматически"></span>
+      <span class="live-bar-time"></span>
+    </div>
   </div>
   <div class="head-actions">
     <a href="/log/by-book" class="btn secondary">По книгам</a>
@@ -132,6 +136,99 @@
     marketplaceSel.addEventListener("change", run);
     errorsCheck.addEventListener("change", run);
     document.getElementById("filter-form").addEventListener("submit", function (e) { e.preventDefault(); run(); });
+  })();
+
+  // ---- Живые обновления журнала (новые записи без перезагрузки) ----
+  (function () {
+    var body    = document.getElementById("log-body");
+    var countEl = document.getElementById("list-count");
+    var timeEl  = document.querySelector(".live-bar-time");
+    if (!body) return;
+
+    var ACTION_LABELS = {
+      catalog_sync: "Сверка каталога", watch_stocks: "Слежение за остатками",
+      poll_orders: "Опрос заказов", order_sold: "Продажа",
+      order_unmatched: "Неизвестный заказ", poll_cancellations: "Проверка отмен",
+      order_cancelled: "Отмена заказа", withdraw: "Снятие", sell: "Снятие (sell)",
+      withdraw_skipped: "Автоснятие пропущено", reconcile_withdrawn: "Сверка снятых",
+      wb_trash: "Корзина WB", check_connection: "Проверка подключения",
+    };
+
+    function esc(s) {
+      return (s == null ? "" : String(s)).replace(/[&<>"']/g, function (c) {
+        return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+      });
+    }
+
+    function makeRow(e) {
+      var rowClass = "row-new" + (e.ok ? "" : " row-error");
+      var badge = e.ok
+        ? '<span class="badge badge-in_stock">ОК</span>'
+        : '<span class="badge badge-error">Ошибка</span>';
+      return '<tr class="' + rowClass + '">' +
+        '<td class="nowrap">' + esc(e.created_at) + '</td>' +
+        '<td>' + esc(e.marketplace || "—") + '</td>' +
+        '<td>' + esc(ACTION_LABELS[e.action] || e.action) + '</td>' +
+        '<td>' + badge + '</td>' +
+        '<td>' + esc(e.message || "") + '</td></tr>';
+    }
+
+    // id последней известной строки — инициализируем из DOM
+    var latestId = 0;
+    body.querySelectorAll("tr[data-log-id]").forEach(function (r) {
+      var id = parseInt(r.dataset.logId, 10);
+      if (id > latestId) latestId = id;
+    });
+    // Если строки не имеют data-log-id (первая загрузка) — берём из /api/live/log?after_id=-1
+    // чтобы не дублировать строки с экрана. Запросим после first tick.
+
+    var firstTick = true;
+
+    function tick() {
+      var marketplaceSel = document.getElementById("filter-marketplace");
+      var errorsCheck    = document.getElementById("filter-errors");
+      var params = new URLSearchParams({
+        after_id: firstTick ? -1 : latestId,
+        marketplace: marketplaceSel ? marketplaceSel.value : "",
+        only_errors: (errorsCheck && errorsCheck.checked) ? "1" : "",
+      });
+      fetch("/api/live/log?" + params.toString())
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d) return;
+          if (firstTick) {
+            // При первом тике просто сохраняем latest_id — не добавляем строки,
+            // они уже есть на странице.
+            latestId = d.latest_id || 0;
+            firstTick = false;
+          } else if (d.items && d.items.length) {
+            latestId = d.items[d.items.length - 1].id;
+            var html = d.items.map(makeRow).join("");
+            // Вставляем сверху tbody
+            body.insertAdjacentHTML("afterbegin", html);
+            // Обновляем счётчик
+            if (countEl) {
+              var n = body.querySelectorAll("tr:not(.empty-row)").length;
+              countEl.textContent = "Показано " + n + " записей";
+            }
+          }
+          if (timeEl) {
+            var now = new Date();
+            timeEl.textContent = "обновлено " + now.toLocaleTimeString("ru-RU", {
+              hour: "2-digit", minute: "2-digit", second: "2-digit"
+            });
+          }
+        })
+        .catch(function () {});
+    }
+
+    tick(); // сразу получаем latest_id
+    setInterval(function () {
+      if (!document.hidden) tick();
+    }, 8000); // каждые 8 сек
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) tick();
+    });
   })();
 </script>
 {% endblock %}

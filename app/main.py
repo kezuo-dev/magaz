@@ -13,7 +13,7 @@ from app.scheduler import start_scheduler, stop_scheduler
 from app.security import check_password
 from app.tunnel import start_tunnel, stop_tunnel
 from app.templating import templates
-from app.routes import catalog, imports, log, settings as settings_routes, analytics
+from app.routes import catalog, imports, log, settings as settings_routes, analytics, live
 
 # Настройка логирования: планировщик и фоновые задачи пишут в stdout, откуда
 # их забирает docker compose logs. Без этого логи планировщика терялись.
@@ -169,3 +169,4 @@ app.include_router(imports.router)
 app.include_router(settings_routes.router)
 app.include_router(log.router)
 app.include_router(analytics.router)
+app.include_router(live.router)

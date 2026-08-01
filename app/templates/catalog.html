@@ -4,6 +4,10 @@
   <div>
     <h1>Каталог</h1>
     <p class="page-sub muted">Мониторинг книг на Ozon и Wildberries — только просмотр.</p>
+    <div class="live-bar" style="margin-top:4px">
+      <span class="live-dot" title="Данные обновляются автоматически"></span>
+      <span class="live-bar-time"></span>
+    </div>
   </div>
   <div class="head-actions">
     <button type="button" id="sync-btn">Обновить каталог</button>
@@ -22,15 +26,15 @@
 
 <div class="stats">
   <div class="stat-card stat-ok">
-    <div class="stat-num">{{ stats.in_stock }}</div>
+    <div class="stat-num" data-live="in_stock">{{ stats.in_stock }}</div>
     <div class="stat-label">В продаже</div>
   </div>
   <div class="stat-card stat-mp">
-    <div class="stat-num">{{ stats.on_ozon }}</div>
+    <div class="stat-num" data-live="on_ozon">{{ stats.on_ozon }}</div>
     <div class="stat-label">На Ozon</div>
   </div>
   <div class="stat-card stat-mp">
-    <div class="stat-num">{{ stats.on_wb }}</div>
+    <div class="stat-num" data-live="on_wb">{{ stats.on_wb }}</div>
     <div class="stat-label">На Wildberries</div>
   </div>
 </div>
@@ -403,8 +407,53 @@
     statusSel.addEventListener("change", run);
     const marketplaceSel = document.getElementById("filter-marketplace");
     marketplaceSel.addEventListener("change", run);
-    // Не перезагружаем страницу по Enter — поиск уже живой.
-    document.getElementById("filter-form").addEventListener("submit", function (e) { e.preventDefault(); run(); });
+  // ---- Живое обновление счётчиков каталога ----
+  (function () {
+    var prev = {};
+
+    function bump(el) {
+      el.classList.remove("num-bump");
+      void el.offsetWidth;
+      el.classList.add("num-bump");
+    }
+
+    function tryUpdate(key, val) {
+      var el = document.querySelector("[data-live='" + key + "']");
+      if (!el) return;
+      var cur = parseInt(el.textContent, 10);
+      if (isNaN(cur) || cur === val) return;
+      el.textContent = val;
+      bump(el);
+    }
+
+    var timeEl = document.querySelector(".live-bar-time");
+
+    function tick() {
+      fetch("/api/live/catalog")
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d) return;
+          tryUpdate("in_stock", d.in_stock);
+          tryUpdate("on_ozon", d.on_ozon);
+          tryUpdate("on_wb", d.on_wb);
+          if (timeEl) {
+            var now = new Date();
+            timeEl.textContent = "обновлено " + now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          }
+        })
+        .catch(function () {});
+    }
+
+    // Каждые 15 сек, только когда вкладка видима
+    var INTERVAL = 15000;
+    var timer = setInterval(function () {
+      if (!document.hidden) tick();
+    }, INTERVAL);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) tick();
+    });
+    // Первый опрос через 5 сек (страница только загружена, данные свежие)
+    setTimeout(tick, 5000);
   })();
-</script>
+
 {% endblock %}
