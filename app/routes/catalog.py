@@ -24,7 +24,7 @@ from app.models import (
     Order,
     SyncLog,
 )
-from app.pdf_export import generate_forbidden_pdf
+from app.pdf_export import generate_catalog_pdf, generate_forbidden_pdf
 from app.photos import UPLOAD_DIR
 from app.reconciliation import reconcile_all_marketplaces
 from app.wb_trash import move_withdrawn_to_trash
@@ -296,6 +296,50 @@ def wipe_catalog(
         shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
 
     return RedirectResponse("/?wiped=1", status_code=303)
+
+
+@router.get("/catalog/export/pdf")
+def export_catalog_pdf(
+    db: Session = Depends(get_db),
+    q: str = "",
+    status: str = "",
+    marketplace: str = "",
+):
+    """Скачать PDF-список книг по текущим фильтрам каталога (поиск/статус/площадка)."""
+    stmt = _filtered_books_query(q, status, marketplace)
+    books = db.scalars(_sorted_books_query(stmt)).all()
+
+    # Формируем читаемое описание фильтра для заголовка в PDF
+    parts = []
+    if q:
+        parts.append(f"поиск: «{q}»")
+    if status:
+        from app.templating import book_status_label
+        parts.append(f"статус: {book_status_label(status)}")
+    if marketplace == "ozon_only":
+        parts.append("только Ozon (нет на WB)")
+    elif marketplace == "wb_only":
+        parts.append("только Wildberries (нет на Ozon)")
+    elif marketplace:
+        parts.append(f"площадка: {marketplace}")
+    subtitle = "Фильтры: " + "; ".join(parts) if parts else "Все книги каталога"
+
+    pdf_bytes = generate_catalog_pdf(books, subtitle=subtitle)
+
+    from urllib.parse import quote
+    safe_name = "catalog"
+    if marketplace == "ozon_only":
+        safe_name = "catalog_ozon_only"
+    elif marketplace == "wb_only":
+        safe_name = "catalog_wb_only"
+    elif status:
+        safe_name = f"catalog_{status}"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={safe_name}.pdf"},
+    )
 
 
 @router.get("/catalog/check_forbidden", response_class=HTMLResponse)

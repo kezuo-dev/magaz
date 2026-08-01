@@ -14,6 +14,7 @@
     <button type="button" id="check-forbidden-btn">Проверить запрещённые темы</button>
     <button type="button" id="reconcile-btn">Проверить снятые</button>
     <button type="button" id="wb-trash-btn">Очистить корзину WB</button>
+    <button type="button" class="secondary" id="export-pdf-open">Экспорт PDF</button>
     <button type="button" class="ghost-danger" id="wipe-open">Очистить</button>
   </div>
 </div>
@@ -135,6 +136,45 @@
 </nav>
 {% endif %}
 
+<!-- Модалка экспорта PDF -->
+<div class="modal-overlay" id="export-pdf-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="export-pdf-title">
+    <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
+    <div class="modal-icon">📄</div>
+    <h2 id="export-pdf-title">Экспорт каталога в PDF</h2>
+    <p class="muted">Выберите критерии — в файл попадут только книги, соответствующие фильтру. Поиск по тексту можно не заполнять.</p>
+    <form id="export-pdf-form" class="modal-form" target="_blank">
+      <div style="display:flex;flex-direction:column;gap:.6rem;margin-bottom:.75rem;">
+        <label style="display:flex;flex-direction:column;gap:.25rem;font-size:.875rem;">
+          <span>Площадка</span>
+          <select name="marketplace" id="ep-marketplace">
+            <option value="">Все площадки</option>
+            <option value="ozon_only">Только Ozon (нет на WB)</option>
+            <option value="wb_only">Только Wildberries (нет на Ozon)</option>
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:.25rem;font-size:.875rem;">
+          <span>Статус</span>
+          <select name="status" id="ep-status">
+            <option value="">Все статусы</option>
+            <option value="in_stock">В продаже</option>
+            <option value="sold">Продана</option>
+            <option value="withdrawn">Снята</option>
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:.25rem;font-size:.875rem;">
+          <span>Поиск по названию / артикулу</span>
+          <input type="text" name="q" id="ep-q" placeholder="Необязательно" autocomplete="off">
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-close>Отмена</button>
+        <button type="submit">Скачать PDF</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- Модалка очистки каталога -->
 <div class="modal-overlay" id="wipe-modal" hidden>
   <div class="modal modal-danger" role="dialog" aria-modal="true" aria-labelledby="wipe-title">
@@ -232,6 +272,21 @@
     setTimeout(() => { m.hidden = true; }, 220);
   }
   document.getElementById("wipe-open").addEventListener("click", () => openModal("wipe-modal"));
+  document.getElementById("export-pdf-open").addEventListener("click", () => openModal("export-pdf-modal"));
+
+  // ---- Экспорт каталога в PDF ----
+  document.getElementById("export-pdf-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    const params = new URLSearchParams({
+      marketplace: document.getElementById("ep-marketplace").value,
+      status:      document.getElementById("ep-status").value,
+      q:           document.getElementById("ep-q").value,
+    });
+    // Убираем пустые параметры — URL будет чище
+    for (const [k, v] of [...params.entries()]) { if (!v) params.delete(k); }
+    window.open("/catalog/export/pdf?" + params.toString(), "_blank");
+    closeModal(document.getElementById("export-pdf-modal"));
+  });
   document.getElementById("sync-btn").addEventListener("click", () => openModal("sync-modal"));
   document.getElementById("check-forbidden-btn").addEventListener("click", () => location.href = "/catalog/check_forbidden");
   document.getElementById("reconcile-btn").addEventListener("click", () => openModal("reconcile-modal"));
