@@ -407,6 +407,10 @@
     statusSel.addEventListener("change", run);
     const marketplaceSel = document.getElementById("filter-marketplace");
     marketplaceSel.addEventListener("change", run);
+    // Не перезагружаем страницу по Enter — поиск уже живой.
+    document.getElementById("filter-form").addEventListener("submit", function (e) { e.preventDefault(); run(); });
+  })();
+
   // ---- Живое обновление счётчиков каталога ----
   (function () {
     var prev = {};
