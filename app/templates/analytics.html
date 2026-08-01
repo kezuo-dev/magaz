@@ -81,7 +81,7 @@ var AN = {
     <div class="an2-card">
       <div class="an2-card-head">
         <span class="an2-card-title">
-          <span class="mp mp-active" style="font-size:11px;padding:2px 7px">OZ</span>
+          <span class="mp mp-active" style="font-size:11px;padding:2px 7px;background:#005bff;color:#fff">OZ</span>
           Ozon
         </span>
         <span class="an2-card-sub" id="chart-ozon-sub">за 30 дней</span>
@@ -166,8 +166,8 @@ var AN = {
 "use strict";
 
 var CHARTS = [
-  { id: "total", series: AN.total, color: "#4f46e5", fill: "rgba(79,70,229,.10)", sub: "chart-total-sub" },
-  { id: "ozon",  series: AN.ozon,  color: "#0891b2", fill: "rgba(8,145,178,.10)",  sub: "chart-ozon-sub"  },
+  { id: "total", series: AN.total, color: "#16a34a", fill: "rgba(22,163,74,.10)",  sub: "chart-total-sub" },
+  { id: "ozon",  series: AN.ozon,  color: "#005bff", fill: "rgba(0,91,255,.10)",   sub: "chart-ozon-sub"  },
   { id: "wb",    series: AN.wb,    color: "#cb11ab", fill: "rgba(203,17,171,.10)", sub: "chart-wb-sub"   },
 ];
 var NS = "http://www.w3.org/2000/svg";
@@ -241,7 +241,7 @@ function renderChart(cfg, days) {
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
   while (svg.firstChild) svg.removeChild(svg.firstChild);
 
-  var PAD = { top: 16, right: 12, bottom: 30, left: 38 };
+  var PAD = { top: 24, right: 12, bottom: 30, left: 38 };
   var cW = W - PAD.left - PAD.right;
   var cH = H - PAD.top  - PAD.bottom;
   var baseY = PAD.top + cH; /* Y-координата нуля */
@@ -262,7 +262,8 @@ function renderChart(cfg, days) {
   var clipId = "clip-" + cfg.id;
   var defs   = mkEl("defs", {}, svg);
   var clip   = mkEl("clipPath", { id: clipId }, defs);
-  mkEl("rect", { x: PAD.left, y: PAD.top, width: cW, height: cH + 2 }, clip);
+  /* +8 сверху — место для кружка в верхней точке (r=5.5) */
+  mkEl("rect", { x: PAD.left, y: PAD.top - 8, width: cW, height: cH + 10 }, clip);
 
   /* Горизонтальные направляющие + подписи Y */
   for (var yi = 0; yi <= yTicks; yi++) {
