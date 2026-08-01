@@ -126,19 +126,19 @@ def reconcile_all_withdrawn() -> None:
 def cleanup_wb_trash() -> None:
     """Удалить снятые книги в корзину WB (ночью в 00:00 МСК).
 
-    Проходит по всем снятым книгам с лотом WB и удаляет карточки небольшими
-    пачками с паузами, чтобы не схлопнуть лимит API (429).
+    Обрабатывает только книги, снятые/проданные за ПОСЛЕДНИЕ СУТКИ — накопившееся
+    за день. Не трогает старые снятия → не схлопывает лимит API (429).
     """
     db = SessionLocal()
     try:
-        result = move_withdrawn_to_trash(db)
+        result = move_withdrawn_to_trash(db, days=1)  # только за последние сутки
         db.commit()
         processed = result.get("processed", 0)
         deleted = result.get("deleted", 0)
         failed = result.get("failed", 0)
         if processed:
             logger.info(
-                "Очистка корзины WB: обработано %s, удалено %s, не удалось %s",
+                "Очистка корзины WB (за сутки): обработано %s, удалено %s, не удалось %s",
                 processed, deleted, failed
             )
     except Exception:  # noqa: BLE001 — сбой очистки не должен ронять планировщик

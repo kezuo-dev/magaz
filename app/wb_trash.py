@@ -28,12 +28,12 @@ def _log(db: Session, *, action, ok, message, book_id=None) -> None:
     )
 
 
-def move_withdrawn_to_trash(db: Session, days: int | None = 90) -> dict:
+def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
     """Удалить снятые книги в корзину WB. Возвращает {processed, deleted, failed}.
 
     days — ограничение по периоду: обрабатываем книги, обновлённые за последние
     N дней. None = без ограничения (все снятые книги за всё время).
-    По умолчанию 90 дней — свежие снятия, не обрабатываем всю историю за раз.
+    По умолчанию 7 дней — безопасный период, не схлопывает лимит API.
     """
     # Проверяем настройки WB
     account = db.scalar(

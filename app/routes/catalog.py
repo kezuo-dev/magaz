@@ -358,10 +358,11 @@ def reconcile_withdrawn(db: Session = Depends(get_db)):
 
 
 @router.post("/catalog/wb_trash")
-def wb_trash(db: Session = Depends(get_db), days: int = Form(90)):
+def wb_trash(db: Session = Depends(get_db), days: int = Form(7)):
     """Кнопка «Очистить корзину WB»: удалить снятые книги в корзину Wildberries.
 
     Принимает параметр days — период в днях (0 = все книги за всё время).
+    По умолчанию 7 дней — безопасный период без риска схлопнуть лимит.
     """
     days_arg = None if days <= 0 else days
     result = move_withdrawn_to_trash(db, days=days_arg)
