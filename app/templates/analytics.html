@@ -457,6 +457,10 @@ window.addEventListener("resize", function () {
 /* ── Живые обновления KPI и графиков ────────────────────────────── */
 (function () {
   var timeEl = document.querySelector(".live-bar-time");
+  if (timeEl) {
+    var _now = new Date();
+    timeEl.textContent = "загружено " + _now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
 
   function bump(el) {
     if (!el) return;
