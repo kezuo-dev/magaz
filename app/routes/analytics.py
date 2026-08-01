@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
