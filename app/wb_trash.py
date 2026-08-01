@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.marketplaces import MarketplaceError, get_client
-from app.models import Book, BookStatus, Listing, MarketplaceAccount, SyncLog, utcnow
+from app.models import Book, BookStatus, Listing, MarketplaceAccount, Order, SyncLog, utcnow
 from app.security import decrypt_credentials
 
 
@@ -77,6 +77,17 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
     # Собираем nmID карточек для удаления
     to_delete = []
     for book in books:
+        # Пропускаем книги с активным (не отменённым) заказом: заказ может быть
+        # отменён позже, и тогда карточку нужно восстановить — не в корзину.
+        has_active_order = db.scalar(
+            select(Order.id).where(
+                Order.book_id == book.id,
+                Order.cancelled == False,  # noqa: E712
+            ).limit(1)
+        ) is not None
+        if has_active_order:
+            continue
+
         listing = next((l for l in book.listings if l.marketplace == "wildberries"), None)
         if not listing or not listing.external_id:
             continue
