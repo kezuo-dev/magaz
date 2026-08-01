@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Букинист{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css?v=16">
+  <link rel="stylesheet" href="/static/style.css?v=17">
 </head>
 <body>
   {% if request.session.get('authed') %}
@@ -14,6 +14,7 @@
       <a href="/" class="brand">📚 <span>Букинист</span></a>
       <nav>
         <a href="/" class="{{ 'active' if path == '/' or path.startswith('/books/') else '' }}"><span>Каталог</span></a>
+        <a href="/analytics" class="{{ 'active' if path.startswith('/analytics') else '' }}"><span>Аналитика</span></a>
         <a href="/import" class="{{ 'active' if path.startswith('/import') else '' }}"><span>Обновление каталога</span></a>
         <a href="/log" class="{{ 'active' if path.startswith('/log') else '' }}"><span>Журнал</span></a>
         <a href="/settings" class="{{ 'active' if path.startswith('/settings') else '' }}"><span>Настройки</span></a>

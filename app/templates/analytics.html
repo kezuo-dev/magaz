@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+{% block title %}Аналитика — Букинист{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Аналитика</h1>
+    <p class="page-sub muted">Продажи, заказы и состояние синхронизации</p>
+  </div>
+  <div class="head-actions">
+    <span class="an-updated muted" id="an-updated">Обновлено только что</span>
+  </div>
+</div>
+
+<!-- ===== KPI ===== -->
+<div class="an-kpi-row">
+  <div class="an-kpi">
+    <div class="an-kpi-icon an-kpi-icon--green">📦</div>
+    <div class="an-kpi-body">
+      <div class="an-kpi-num">{{ stats.in_stock }}</div>
+      <div class="an-kpi-label">В продаже сейчас</div>
+    </div>
+  </div>
+  <div class="an-kpi">
+    <div class="an-kpi-icon an-kpi-icon--purple">🛒</div>
+    <div class="an-kpi-body">
+      <div class="an-kpi-num">{{ stats.orders_7d }}</div>
+      <div class="an-kpi-label">Продаж за 7 дней</div>
+    </div>
+  </div>
+  <div class="an-kpi">
+    <div class="an-kpi-icon an-kpi-icon--blue">📈</div>
+    <div class="an-kpi-body">
+      <div class="an-kpi-num">{{ stats.orders_30d }}</div>
+      <div class="an-kpi-label">Продаж за 30 дней</div>
+    </div>
+  </div>
+  <div class="an-kpi">
+    <div class="an-kpi-icon an-kpi-icon--red">❌</div>
+    <div class="an-kpi-body">
+      <div class="an-kpi-num">{{ stats.cancellations_30d }}</div>
+      <div class="an-kpi-label">Отмен за 30 дней</div>
+    </div>
+  </div>
+  <div class="an-kpi">
+    <div class="an-kpi-icon an-kpi-icon--ink">📚</div>
+    <div class="an-kpi-body">
+      <div class="an-kpi-num">{{ stats.total_books }}</div>
+      <div class="an-kpi-label">Книг в каталоге</div>
+    </div>
+  </div>
+  <div class="an-kpi {% if stats.health_pct >= 95 %}an-kpi--ok{% elif stats.health_pct >= 80 %}an-kpi--warn{% else %}an-kpi--err{% endif %}">
+    <div class="an-kpi-icon an-kpi-icon--{{ 'green' if stats.health_pct >= 95 else ('orange' if stats.health_pct >= 80 else 'red') }}">⚡</div>
+    <div class="an-kpi-body">
+      <div class="an-kpi-num">{{ stats.health_pct }}%</div>
+      <div class="an-kpi-label">Синхронизация 24ч</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Сетка ===== -->
+<div class="an-grid">
+
+  <!-- График продаж -->
+  <div class="an-card an-card--wide">
+    <div class="an-card-head">
+      <span class="an-card-title">Продажи за 30 дней</span>
+      <span class="muted" style="font-size:13px">по дате заказа (МСК)</span>
+    </div>
+    <div class="an-chart-wrap" id="sales-chart-wrap">
+      {% set series = stats.days_series %}
+      {% set max_val = series | map(attribute='count') | max %}
+      {% set max_val = max_val if max_val > 0 else 1 %}
+      <svg class="an-chart" viewBox="0 0 620 130" preserveAspectRatio="none" aria-hidden="true">
+        <!-- Горизонтальные направляющие -->
+        {% for y_pct in [0, 25, 50, 75, 100] %}
+          {% set y = 110 - y_pct * 0.9 %}
+          <line x1="0" y1="{{ y }}" x2="620" y2="{{ y }}" stroke="var(--line)" stroke-width="1"/>
+        {% endfor %}
+        <!-- Столбики -->
+        {% for d in series %}
+          {% set x = loop.index0 * 620 / 30 + 3 %}
+          {% set bar_h = (d.count / max_val) * 90 %}
+          {% set bar_y = 110 - bar_h %}
+          {% set bar_w = 620 / 30 - 3 %}
+          <rect class="an-bar{% if d.count == 0 %} an-bar--zero{% endif %}"
+                x="{{ x }}" y="{{ bar_y }}"
+                width="{{ bar_w }}" height="{{ bar_h }}"
+                rx="3"
+                data-label="{{ d.label }}" data-count="{{ d.count }}"/>
+        {% endfor %}
+        <!-- Метки оси X (каждые 5 дней) -->
+        {% for d in series %}
+          {% if loop.index0 % 5 == 0 %}
+            {% set x = loop.index0 * 620 / 30 + 3 %}
+            <text x="{{ x + 620/30/2 - 3 }}" y="125" class="an-axis-label">{{ d.label }}</text>
+          {% endif %}
+        {% endfor %}
+      </svg>
+      <!-- Тултип -->
+      <div class="an-tooltip" id="an-tooltip" hidden></div>
+    </div>
+  </div>
+
+  <!-- Разбивка по площадкам -->
+  <div class="an-card">
+    <div class="an-card-head">
+      <span class="an-card-title">По площадкам</span>
+      <span class="muted" style="font-size:13px">все продажи</span>
+    </div>
+    <div class="an-mp-list">
+      {% for mp_key, mp_count in stats.mp_sales.items() %}
+      {% set pct = (mp_count / stats.mp_sales_total * 100) | round(1) %}
+      <div class="an-mp-row">
+        <span class="mp mp-active" title="{{ mp_key }}">{{ mp_key[:2].upper() }}</span>
+        <div class="an-mp-info">
+          <div class="an-mp-name">{{ mp_key | capitalize if mp_key != 'wildberries' else 'Wildberries' }}</div>
+          <div class="an-mp-bar-wrap">
+            <div class="an-mp-bar" style="width: {{ pct }}%"></div>
+          </div>
+        </div>
+        <span class="an-mp-count">{{ mp_count }}</span>
+      </div>
+      {% else %}
+      <p class="muted" style="font-size:14px;padding:16px 0">Заказов пока нет</p>
+      {% endfor %}
+    </div>
+    <div class="an-donut-wrap">
+      {% if stats.mp_sales %}
+      <svg viewBox="0 0 120 120" class="an-donut" aria-hidden="true">
+        {% set total = stats.mp_sales_total %}
+        {% set colors = ['#4f46e5','#7c3aed','#2563eb','#0891b2'] %}
+        {% set offset_ns = namespace(v=0) %}
+        {% set r = 44 %}
+        {% set circ = 2 * 3.14159 * r %}
+        {% for mp_key, mp_count in stats.mp_sales.items() %}
+          {% set pct = mp_count / total %}
+          {% set dash = pct * circ %}
+          {% set gap = circ - dash %}
+          {% set color = colors[loop.index0 % colors|length] %}
+          <circle cx="60" cy="60" r="{{ r }}"
+            fill="none" stroke="{{ color }}" stroke-width="16"
+            stroke-dasharray="{{ '%.1f' % dash }} {{ '%.1f' % gap }}"
+            stroke-dashoffset="{{ '%.1f' % (circ * (1 - offset_ns.v)) }}"
+            transform="rotate(-90 60 60)"/>
+          {% set offset_ns.v = offset_ns.v + pct %}
+        {% endfor %}
+        <text x="60" y="56" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">{{ stats.total_orders }}</text>
+        <text x="60" y="70" text-anchor="middle" font-size="9" fill="var(--muted)">заказов</text>
+      </svg>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Последние продажи -->
+  <div class="an-card an-card--wide">
+    <div class="an-card-head">
+      <span class="an-card-title">Последние продажи</span>
+      <a href="/" class="an-card-link">Каталог →</a>
+    </div>
+    {% if stats.recent_sales %}
+    <div class="table-wrap" style="box-shadow:none;border:none;border-radius:0;margin:0 -24px;width:calc(100% + 48px)">
+    <table class="grid" style="font-size:14px">
+      <thead>
+        <tr>
+          <th>Книга</th>
+          <th>Площадка</th>
+          <th style="text-align:right">Цена</th>
+          <th class="nowrap">Дата</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for s in stats.recent_sales %}
+      <tr class="clickable" data-href="/books/{{ s.book_id }}">
+        <td class="col-title">
+          <a href="/books/{{ s.book_id }}">{{ s.title }}</a>
+          {% if s.author %}<span class="row-sub">{{ s.author }}</span>{% endif %}
+        </td>
+        <td>
+          <span class="mp mp-active">{{ s.mp_key[:2].upper() if s.mp_key != 'wildberries' else 'WB' }}</span>
+          <span style="font-size:13px;color:var(--ink-soft);margin-left:6px">{{ s.marketplace }}</span>
+        </td>
+        <td style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">
+          {% if s.price %}{{ "%.0f ₽" | format(s.price) }}{% else %}—{% endif %}
+        </td>
+        <td class="nowrap muted" style="font-size:13px">{{ s.created_at | msk }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-box" style="padding:32px 20px">
+      <div class="empty-icon">🛒</div>
+      <div>Продаж пока не было</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Топ авторов -->
+  <div class="an-card">
+    <div class="an-card-head">
+      <span class="an-card-title">Топ авторов</span>
+      <span class="muted" style="font-size:13px">по числу продаж</span>
+    </div>
+    {% if stats.top_authors %}
+    <ol class="an-top-list">
+      {% for a in stats.top_authors %}
+      <li class="an-top-item">
+        <span class="an-top-rank">{{ loop.index }}</span>
+        <div class="an-top-body">
+          <div class="an-top-name">{{ a.author }}</div>
+          <div class="an-top-bar-wrap">
+            <div class="an-top-bar" style="width:{{ (a.sales / stats.max_author_sales * 100)|round }}%"></div>
+          </div>
+        </div>
+        <span class="an-top-count badge badge-in_stock">{{ a.sales }}</span>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="muted" style="font-size:14px;padding:16px 0">Данных пока нет</p>
+    {% endif %}
+  </div>
+
+  <!-- Здоровье синхронизации -->
+  <div class="an-card">
+    <div class="an-card-head">
+      <span class="an-card-title">Синхронизация</span>
+      <a href="/log" class="an-card-link">Журнал →</a>
+    </div>
+    <div class="an-health">
+      <div class="an-health-ring-wrap">
+        <svg viewBox="0 0 100 100" class="an-health-ring" aria-hidden="true">
+          <circle cx="50" cy="50" r="40" fill="none" stroke="var(--line)" stroke-width="10"/>
+          <circle cx="50" cy="50" r="40" fill="none"
+            stroke="{% if stats.health_pct >= 95 %}var(--ok){% elif stats.health_pct >= 80 %}var(--warn){% else %}var(--danger){% endif %}"
+            stroke-width="10"
+            stroke-linecap="round"
+            stroke-dasharray="{{ '%.1f' % (stats.health_pct * 2.513) }} 251.3"
+            stroke-dashoffset="62.8"
+            transform="rotate(-90 50 50)"/>
+          <text x="50" y="46" text-anchor="middle" font-size="18" font-weight="700" fill="var(--ink)">{{ stats.health_pct }}%</text>
+          <text x="50" y="60" text-anchor="middle" font-size="9" fill="var(--muted)">успешность</text>
+        </svg>
+      </div>
+      <div class="an-health-stats">
+        <div class="an-health-row">
+          <span class="an-health-dot" style="background:var(--ok)"></span>
+          <span>Успешно за 24ч</span>
+          <strong>{{ stats.total_24h - stats.errors_24h }}</strong>
+        </div>
+        <div class="an-health-row">
+          <span class="an-health-dot" style="background:var(--danger)"></span>
+          <span>Ошибок за 24ч</span>
+          <strong class="{{ 'color-err' if stats.errors_24h else '' }}">{{ stats.errors_24h }}</strong>
+        </div>
+        <div class="an-health-row">
+          <span class="an-health-dot" style="background:var(--muted)"></span>
+          <span>Всего за 24ч</span>
+          <strong>{{ stats.total_24h }}</strong>
+        </div>
+      </div>
+    </div>
+    {% if stats.last_error %}
+    <div class="an-last-error">
+      <span class="an-last-error-label">Последняя ошибка</span>
+      <div class="an-last-error-msg">{{ stats.last_error.message or '—' }}</div>
+      <div class="muted" style="font-size:12px;margin-top:2px">{{ stats.last_error.created_at | msk }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Каталог: статусы -->
+  <div class="an-card">
+    <div class="an-card-head">
+      <span class="an-card-title">Статусы каталога</span>
+      <a href="/" class="an-card-link">Смотреть →</a>
+    </div>
+    {% set status_data = [
+      ('В продаже',  stats.in_stock,       'ok',      '📦'),
+      ('Продано',    stats.sold_total,      'sold',    '✅'),
+      ('Снято',      stats.withdrawn_total, 'muted',   '📭'),
+    ] %}
+    {% set cat_total = stats.total_books if stats.total_books else 1 %}
+    <div class="an-status-list">
+      {% for label, count, cls, icon in status_data %}
+      <div class="an-status-row">
+        <span class="an-status-icon">{{ icon }}</span>
+        <div class="an-status-body">
+          <div class="an-status-top">
+            <span>{{ label }}</span>
+            <strong>{{ count }}</strong>
+          </div>
+          <div class="an-status-bar-wrap">
+            <div class="an-status-bar an-status-bar--{{ cls }}"
+                 style="width:{{ (count / cat_total * 100)|round }}%"></div>
+          </div>
+        </div>
+        <span class="muted" style="font-size:12px;flex-shrink:0">{{ (count / cat_total * 100)|round }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap">
+      <a href="/?status=in_stock" class="btn-secondary" style="font-size:13px;padding:6px 12px;border-radius:8px;text-decoration:none;background:#eef1f6;color:var(--ink-soft);border:1px solid var(--line-strong)">Активные</a>
+      <a href="/?status=sold" class="btn-secondary" style="font-size:13px;padding:6px 12px;border-radius:8px;text-decoration:none;background:#eef1f6;color:var(--ink-soft);border:1px solid var(--line-strong)">Проданные</a>
+      <a href="/?status=withdrawn" class="btn-secondary" style="font-size:13px;padding:6px 12px;border-radius:8px;text-decoration:none;background:#eef1f6;color:var(--ink-soft);border:1px solid var(--line-strong)">Снятые</a>
+    </div>
+  </div>
+
+</div><!-- /an-grid -->
+
+<script>
+(function () {
+  // Tooltip для графика
+  const wrap = document.getElementById("sales-chart-wrap");
+  const tip = document.getElementById("an-tooltip");
+  if (!wrap || !tip) return;
+
+  function showTip(bar, e) {
+    const label = bar.dataset.label;
+    const count = bar.dataset.count;
+    tip.textContent = label + ": " + count + " продаж" + (count == 1 ? "а" : count < 5 ? "и" : "");
+    tip.hidden = false;
+    positionTip(e);
+  }
+  function positionTip(e) {
+    const rect = wrap.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    tip.style.left = Math.min(x + 12, wrap.offsetWidth - tip.offsetWidth - 8) + "px";
+    tip.style.top = Math.max(y - 36, 4) + "px";
+  }
+
+  wrap.addEventListener("mousemove", function (e) {
+    const bar = e.target.closest(".an-bar");
+    if (bar) { showTip(bar, e); } else { tip.hidden = true; }
+  });
+  wrap.addEventListener("mouseleave", function () { tip.hidden = true; });
+
+  // Строки таблицы — переход по клику
+  document.querySelectorAll("tr.clickable").forEach(function (row) {
+    row.addEventListener("click", function (e) {
+      if (!e.target.closest("a")) location.href = row.dataset.href;
+    });
+  });
+})();
+</script>
+{% endblock %}
