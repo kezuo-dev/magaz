@@ -2,14 +2,8 @@
 {% block title %}Аналитика — Букинист{% endblock %}
 {% block content %}
 <script>
-(function(){
-  var t = {{ token | tojson }};
-  if (t) {
-    sessionStorage.setItem('an_token', t);
-    // убираем ?t=... из адресной строки
-    history.replaceState(null, '', '/analytics');
-  }
-})();
+// Убираем ?t=... из адресной строки — после этого F5 снова попросит пароль
+history.replaceState(null, '', '/analytics');
 </script>
 <div class="page-head">
   <div>
