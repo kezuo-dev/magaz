@@ -136,6 +136,20 @@
 </nav>
 {% endif %}
 
+<!-- Модалка подтверждения проверки запрещённых тем -->
+<div class="modal-overlay" id="check-forbidden-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="check-forbidden-title">
+    <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
+    <div class="modal-icon">🔎</div>
+    <h2 id="check-forbidden-title">Проверить запрещённые темы?</h2>
+    <p class="muted">Программа просканирует все книги в продаже на ключевые слова: экстремизм, терроризм и другие запрещённые категории. Результат откроется на отдельной странице.</p>
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-close>Отмена</button>
+      <button type="button" id="check-forbidden-go">Проверить</button>
+    </div>
+  </div>
+</div>
+
 <!-- Модалка экспорта PDF -->
 <div class="modal-overlay" id="export-pdf-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="export-pdf-title">
@@ -288,7 +302,8 @@
     closeModal(document.getElementById("export-pdf-modal"));
   });
   document.getElementById("sync-btn").addEventListener("click", () => openModal("sync-modal"));
-  document.getElementById("check-forbidden-btn").addEventListener("click", () => location.href = "/catalog/check_forbidden");
+  document.getElementById("check-forbidden-btn").addEventListener("click", () => openModal("check-forbidden-modal"));
+  document.getElementById("check-forbidden-go").addEventListener("click", () => location.href = "/catalog/check_forbidden");
   document.getElementById("reconcile-btn").addEventListener("click", () => openModal("reconcile-modal"));
   document.getElementById("wb-trash-btn").addEventListener("click", () => openModal("wb-trash-modal"));
   document.querySelectorAll(".modal-overlay").forEach(function (ov) {
