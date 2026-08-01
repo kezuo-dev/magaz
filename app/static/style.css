@@ -96,6 +96,23 @@ main { flex: 1; max-width: 1180px; margin: 28px auto; padding: 0 32px; min-width
 
 /* ---------- Заголовки ---------- */
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; gap: 16px; flex-wrap: wrap; }
+
+/* Шапка-баннер: карточка с акцентной полосой слева (используется в каталоге) */
+.page-head--banner {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 18px 22px;
+  box-shadow: var(--shadow-sm);
+  align-items: center;
+}
+.page-head-left { display: flex; flex-direction: column; gap: 2px; }
+.page-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--accent); opacity: .8;
+}
+
 h1 { font-size: 24px; margin: 0; letter-spacing: -.02em; }
 h2 { font-size: 17px; margin-top: 28px; }
 .page-sub { margin: 4px 0 0; font-size: 14px; }
