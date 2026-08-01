@@ -67,6 +67,9 @@ def live_log(
     Фронт передаёт id самой свежей строки, которую уже показал, и получает
     только новое. Фильтры повторяют /log, чтобы живая дописка не тащила
     записи, отфильтрованные пользователем.
+
+    Поле book_id/sku/title заполняется, если у записи есть привязка к книге —
+    нужно для страницы «по книгам».
     """
     stmt = select(SyncLog).where(SyncLog.id > after_id)
     if marketplace:
@@ -83,17 +86,29 @@ def live_log(
 
     latest_id = db.scalar(select(func.max(SyncLog.id))) or 0
 
-    items = [
-        {
-            "id": e.id,
-            "created_at": _to_msk(e.created_at),
-            "marketplace": marketplace_label(e.marketplace) if e.marketplace else "—",
-            "action": e.action,
-            "ok": e.ok,
-            "message": e.message or "",
-        }
-        for e in entries
-    ]
+    # Подтягиваем книги одним запросом вместо N+1
+    book_ids = [e.book_id for e in entries if e.book_id is not None]
+    books: dict[int, Book] = {}
+    if book_ids:
+        for b in db.scalars(select(Book).where(Book.id.in_(book_ids))).all():
+            books[b.id] = b
+
+    items = []
+    for e in entries:
+        book = books.get(e.book_id) if e.book_id else None
+        items.append(
+            {
+                "id": e.id,
+                "created_at": _to_msk(e.created_at),
+                "marketplace": marketplace_label(e.marketplace) if e.marketplace else "—",
+                "action": e.action,
+                "ok": e.ok,
+                "message": e.message or "",
+                "book_id": e.book_id,
+                "sku": book.sku if book else None,
+                "title": book.title if book else None,
+            }
+        )
     return JSONResponse({"items": items, "latest_id": latest_id})
 
 

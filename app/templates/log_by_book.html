@@ -4,6 +4,10 @@
   <div>
     <h1>Журнал по книгам</h1>
     <p class="page-sub muted">Записи сгруппированы по артикулам</p>
+    <div class="live-bar" style="margin-top:4px">
+      <span class="live-dot" title="Новые записи появляются автоматически"></span>
+      <span class="live-bar-time"></span>
+    </div>
   </div>
   <div class="head-actions">
     <a href="/log" class="btn secondary">Обычный журнал</a>
@@ -34,7 +38,7 @@
 {% else %}
 <div class="log-groups">
   {% for group in groups %}
-  <div class="log-group">
+  <div class="log-group" data-book-id="{{ group.book_id }}">
     <div class="log-group-header">
       <div class="log-book-info">
         <div class="sku-cell">
@@ -149,6 +153,132 @@
       if (!btn) return;
       e.stopPropagation();
       copyText(btn.dataset.copy, btn);
+    });
+  })();
+
+  // ---- Живые обновления журнала по книгам ----
+  (function () {
+    var container = document.querySelector(".log-groups");
+    var timeEl    = document.querySelector(".live-bar-time");
+    var latestId  = 0;
+    var firstTick = true;
+
+    var ACTION_LABELS = {
+      catalog_sync: "Сверка каталога", watch_stocks: "Слежение за остатками",
+      poll_orders: "Опрос заказов", order_sold: "Продажа",
+      order_unmatched: "Неизвестный заказ", poll_cancellations: "Проверка отмен",
+      order_cancelled: "Отмена заказа", withdraw: "Снятие", sell: "Снятие (sell)",
+      withdraw_skipped: "Автоснятие пропущено", reconcile_withdrawn: "Сверка снятых",
+      wb_trash: "Корзина WB", check_connection: "Проверка подключения",
+    };
+
+    function esc(s) {
+      return (s == null ? "" : String(s)).replace(/[&<>"']/g, function (c) {
+        return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c];
+      });
+    }
+
+    function makeEntryRow(e) {
+      var badge = e.ok
+        ? '<span class="badge badge-in_stock">ОК</span>'
+        : '<span class="badge badge-error">Ошибка</span>';
+      var cls = "row-new" + (e.ok ? "" : " row-error");
+      return '<tr class="' + cls + '">' +
+        '<td class="nowrap">' + esc(e.created_at) + '</td>' +
+        '<td>' + esc(e.marketplace || "—") + '</td>' +
+        '<td>' + esc(ACTION_LABELS[e.action] || e.action) + '</td>' +
+        '<td>' + badge + '</td>' +
+        '<td>' + esc(e.message || "") + '</td></tr>';
+    }
+
+    function makeNewGroup(e) {
+      var skuVal = esc(e.sku || "—");
+      return '<div class="log-group" data-book-id="' + e.book_id + '">' +
+        '<div class="log-group-header">' +
+          '<div class="log-book-info">' +
+            '<div class="sku-cell">' +
+              '<span class="mono sku-text">' + skuVal + '</span>' +
+              '<button type="button" class="copy-btn" data-copy="' + skuVal + '" ' +
+                'title="Скопировать артикул" aria-label="Скопировать артикул">' +
+                '<span class="copy-icon" aria-hidden="true">⧉</span></button>' +
+            '</div>' +
+            (e.title ? '<span class="log-book-title">' + esc(e.title) + '</span>' : '') +
+          '</div>' +
+          '<span class="log-group-count muted">1 записей</span>' +
+        '</div>' +
+        '<table class="grid log-group-table">' +
+          '<thead><tr>' +
+            '<th style="width:15%">Время</th><th style="width:15%">Площадка</th>' +
+            '<th style="width:15%">Действие</th><th style="width:10%">Итог</th>' +
+            '<th style="width:45%">Сообщение</th>' +
+          '</tr></thead>' +
+          '<tbody>' + makeEntryRow(e) + '</tbody>' +
+        '</table></div>';
+    }
+
+    function tick() {
+      var marketplaceSel = document.getElementById("filter-marketplace");
+      var errorsCheck    = document.getElementById("filter-errors");
+      var params = new URLSearchParams({
+        after_id: firstTick ? -1 : latestId,
+        marketplace: marketplaceSel ? marketplaceSel.value : "",
+        only_errors: (errorsCheck && errorsCheck.checked) ? "1" : "",
+      });
+      fetch("/api/live/log?" + params.toString())
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d) return;
+          if (firstTick) {
+            latestId = d.latest_id || 0;
+            firstTick = false;
+          } else if (d.items && d.items.length) {
+            latestId = d.items[d.items.length - 1].id;
+
+            // Только записи, привязанные к книге
+            var bookItems = d.items.filter(function (e) { return e.book_id; });
+
+            bookItems.forEach(function (e) {
+              if (!container) return;
+              // Ищем уже существующую группу по book_id
+              var group = container.querySelector('[data-book-id="' + e.book_id + '"]');
+              if (group) {
+                // Вставляем строку сверху tbody группы
+                var tbody = group.querySelector("tbody");
+                if (tbody) tbody.insertAdjacentHTML("afterbegin", makeEntryRow(e));
+                // Обновляем счётчик
+                var cnt = group.querySelector(".log-group-count");
+                if (cnt) {
+                  var n = group.querySelectorAll("tbody tr").length;
+                  cnt.textContent = n + " записей";
+                }
+              } else {
+                // Новая книга — создаём группу сверху списка
+                // Убираем «пусто» если он был
+                var empty = container.querySelector(".log-groups-empty");
+                if (empty) empty.remove();
+                container.insertAdjacentHTML("afterbegin", makeNewGroup(e));
+                // Анимация появления группы
+                var ng = container.firstElementChild;
+                if (ng) {
+                  ng.style.animation = "page-in .35s cubic-bezier(.16,1,.3,1)";
+                }
+              }
+            });
+          }
+          if (timeEl) {
+            var now = new Date();
+            timeEl.textContent = "обновлено " + now.toLocaleTimeString("ru-RU", {
+              hour: "2-digit", minute: "2-digit", second: "2-digit"
+            });
+          }
+        })
+        .catch(function () {});
+    }
+
+    tick();
+    setInterval(function () { if (!document.hidden) tick(); }, 8000);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) tick();
     });
   })();
 </script>

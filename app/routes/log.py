@@ -134,6 +134,7 @@ def log_by_book(
         if not book:
             continue
         groups.append({
+            "book_id": book_id,
             "sku": book.sku,
             "title": book.title,
             "entries": sorted(log_entries, key=lambda e: e.created_at, reverse=True),
