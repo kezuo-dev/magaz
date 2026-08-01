@@ -2,16 +2,14 @@
 {% block title %}Аналитика — Букинист{% endblock %}
 {% block content %}
 <script>
+// Запускается ДО рендера div-а: если токен есть — уходим, div так и не покажется.
 (function(){
   {% if stale %}
   sessionStorage.removeItem('an_token');
   {% else %}
   var t = sessionStorage.getItem('an_token');
-  if (t) { window.location.replace('/analytics?t=' + t); return; }
+  if (t) { window.location.replace('/analytics?t=' + t); }
   {% endif %}
-  // Токена нет — показываем форму (по умолчанию скрыта, чтобы не мигать при редиректе)
-  var w = document.getElementById('an-stub-wrap');
-  if (w) w.style.display = '';
 })();
 </script>
 <div class="an-stub-wrap" id="an-stub-wrap" style="display:none">
@@ -47,6 +45,10 @@
 
   </div>
 </div>
+<script>
+// Div уже в DOM — показываем форму (если редирект не сработал выше).
+document.getElementById('an-stub-wrap').style.display = '';
+</script>
 
 <style>
 .an-stub-wrap {
