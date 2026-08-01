@@ -94,6 +94,28 @@ def marketplace_short(value: str) -> str:
 MARKETPLACE_ORDER = {"ozon": 0, "wildberries": 1}
 
 
+ACTION_LABELS = {
+    "catalog_sync":        "Сверка каталога",
+    "watch_stocks":        "Слежение за остатками",
+    "poll_orders":         "Опрос заказов",
+    "order_sold":          "Продажа",
+    "order_unmatched":     "Неизвестный заказ",
+    "poll_cancellations":  "Проверка отмен",
+    "order_cancelled":     "Отмена заказа",
+    "withdraw":            "Снятие",
+    "sell":                "Снятие (sell)",
+    "withdraw_skipped":    "Автоснятие пропущено",
+    "reconcile_withdrawn": "Сверка снятых",
+    "wb_trash":            "Корзина WB",
+    "check_connection":    "Проверка подключения",
+}
+
+
+def action_label(value: str) -> str:
+    """Человекочитаемое название действия из журнала."""
+    return ACTION_LABELS.get(value, value)
+
+
 def sort_listings(listings) -> list:
     """Лоты в стабильном порядке площадок (Ozon → Wildberries → прочие)."""
     return sorted(listings, key=lambda l: (MARKETPLACE_ORDER.get(l.marketplace, 99), l.marketplace))
@@ -107,4 +129,5 @@ templates.env.globals["listing_status_label"] = listing_status_label
 templates.env.globals["marketplace_label"] = marketplace_label
 templates.env.globals["marketplace_short"] = marketplace_short
 templates.env.globals["sort_listings"] = sort_listings
+templates.env.globals["action_label"] = action_label
 templates.env.filters["msk"] = _to_msk

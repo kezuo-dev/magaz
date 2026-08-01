@@ -48,7 +48,7 @@
     <tr class="{{ 'row-error' if not e.ok else '' }}">
       <td class="nowrap">{{ e.created_at | msk }}</td>
       <td>{{ marketplace_label(e.marketplace) if e.marketplace else '—' }}</td>
-      <td>{{ e.action }}</td>
+      <td>{{ action_label(e.action) }}</td>
       <td>{% if e.ok %}<span class="badge badge-in_stock">ОК</span>{% else %}<span class="badge badge-error">Ошибка</span>{% endif %}</td>
       <td>{{ e.message or '' }}</td>
     </tr>
@@ -73,6 +73,15 @@
 
     if (!input || !body) return; // журнал может быть пуст
 
+    const ACTION_LABELS = {
+      catalog_sync: "Сверка каталога", watch_stocks: "Слежение за остатками",
+      poll_orders: "Опрос заказов", order_sold: "Продажа",
+      order_unmatched: "Неизвестный заказ", poll_cancellations: "Проверка отмен",
+      order_cancelled: "Отмена заказа", withdraw: "Снятие", sell: "Снятие (sell)",
+      withdraw_skipped: "Автоснятие пропущено", reconcile_withdrawn: "Сверка снятых",
+      wb_trash: "Корзина WB", check_connection: "Проверка подключения",
+    };
+
     function esc(s) {
       return (s == null ? "" : String(s)).replace(/[&<>"']/g, c =>
         ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -91,7 +100,7 @@
         return '<tr class="' + rowClass + '">' +
           '<td class="nowrap">' + esc(e.created_at) + '</td>' +
           '<td>' + esc(e.marketplace || '—') + '</td>' +
-          '<td>' + esc(e.action) + '</td>' +
+          '<td>' + esc(ACTION_LABELS[e.action] || e.action) + '</td>' +
           '<td>' + badge + '</td>' +
           '<td>' + esc(e.message || '') + '</td></tr>';
       }).join("");

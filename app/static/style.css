@@ -99,7 +99,7 @@ main { flex: 1; max-width: 1180px; margin: 28px auto; padding: 0 32px; min-width
 h1 { font-size: 24px; margin: 0; letter-spacing: -.02em; }
 h2 { font-size: 17px; margin-top: 28px; }
 .page-sub { margin: 4px 0 0; font-size: 14px; }
-.head-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
 
 /* ---------- Поля и кнопки ---------- */
 input, select, textarea, button {
