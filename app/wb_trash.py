@@ -74,18 +74,23 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
              message=f"Очистка корзины WB ({period_label}): снятых книг для удаления нет")
         return {"processed": 0, "deleted": 0, "failed": 0}
 
+    # Одним запросом узнаём, у каких книг есть активный (не отменённый) заказ.
+    # Раньше был N+1: отдельный SELECT для каждой книги.
+    book_ids = [b.id for b in books]
+    active_order_book_ids: set[int] = set(
+        db.scalars(
+            select(Order.book_id).where(
+                Order.book_id.in_(book_ids),
+                Order.cancelled == False,  # noqa: E712
+            ).distinct()
+        ).all()
+    )
+
     # Собираем nmID карточек для удаления
     to_delete = []
     for book in books:
-        # Пропускаем книги с активным (не отменённым) заказом: заказ может быть
-        # отменён позже, и тогда карточку нужно восстановить — не в корзину.
-        has_active_order = db.scalar(
-            select(Order.id).where(
-                Order.book_id == book.id,
-                Order.cancelled == False,  # noqa: E712
-            ).limit(1)
-        ) is not None
-        if has_active_order:
+        # Пропускаем книги с активным заказом: заказ может быть отменён позже.
+        if book.id in active_order_book_ids:
             continue
 
         listing = next((l for l in book.listings if l.marketplace == "wildberries"), None)

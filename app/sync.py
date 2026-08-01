@@ -191,11 +191,11 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
             order_key = f"{info.external_order_id}#{info.external_sku}"
 
         exists = db.scalar(
-            select(Order).where(
+            select(Order.id).where(
                 Order.marketplace == marketplace,
                 Order.external_order_id == order_key,
-            )
-        )
+            ).limit(1)
+        ) is not None
         if exists:
             continue
 
@@ -315,7 +315,7 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
             # WB из корзины + выставить остаток 1). Без API-вызова статус менялся
             # только локально, а на площадке карточка оставалась снятой.
             for listing in book.listings:
-                if listing.status != ListingStatus.WITHDRAWN:
+                if listing.status not in (ListingStatus.WITHDRAWN, ListingStatus.ERROR):
                     continue
                 listing.status = ListingStatus.ACTIVE
                 listing.last_synced_at = utcnow()

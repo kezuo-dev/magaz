@@ -162,10 +162,9 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
         )
 
         # Снимаем через sell() (через withdraw_book с use_sell=True) — обнуляет
-        # остаток БЕЗ архивации Ozon, для WB удаляет в корзину. Без реального
-        # API-вызова книга остаётся в продаже и сверка будет находить её снова.
-        listing.status = ListingStatus.ACTIVE  # временно, чтобы withdraw_book сработал
-        listing.last_synced_at = utcnow()
+        # остаток БЕЗ архивации Ozon. withdraw_book сам проставляет статус лота:
+        # WITHDRAWN при успехе/офлайн, ERROR при сбое API. Взводить ACTIVE не нужно
+        # и опасно: если что-то упадёт до вызова, лот навсегда останется активным.
         try:
             success = withdraw_book(db, book, marketplace, use_sell=True)
             if success:

@@ -201,7 +201,11 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
                 pass
 
         try:
-            db.flush()  # нужен book.id для лота
+            # flush нужен только для новых книг: нужен book.id для создания лота.
+            # Для уже существующих книг (updated) book.id уже есть — flush лишний
+            # и при 10k карточек даёт 10k лишних roundtrip к БД.
+            if book.id is None:
+                db.flush()
         except Exception as exc:
             # IntegrityError при дубле SKU (race condition с AUTO-{isbn}): откатываем
             # добавление и ищем книгу заново. Если она появилась — используем её.
