@@ -240,7 +240,7 @@ function renderChart(cfg, days) {
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
   while (svg.firstChild) svg.removeChild(svg.firstChild);
 
-  var PAD = { top: 24, right: 12, bottom: 30, left: 38 };
+  var PAD = { top: 24, right: 16, bottom: 30, left: 38 };
   var cW = W - PAD.left - PAD.right;
   var cH = H - PAD.top  - PAD.bottom;
   var baseY = PAD.top + cH; /* Y-координата нуля */
@@ -261,8 +261,12 @@ function renderChart(cfg, days) {
   var clipId = "clip-" + cfg.id;
   var defs   = mkEl("defs", {}, svg);
   var clip   = mkEl("clipPath", { id: clipId }, defs);
-  /* +8 сверху — место для кружка в верхней точке (r=5.5) */
-  mkEl("rect", { x: PAD.left, y: PAD.top - 8, width: cW, height: cH + 10 }, clip);
+  /* Поля вокруг области: +8 сверху и ±8 по бокам — место для кружка в крайних
+     точках (r=5.5 + тень), иначе последняя точка обрезается пополам. */
+  mkEl("rect", {
+    x: PAD.left - 8, y: PAD.top - 8,
+    width: cW + 16, height: cH + 10,
+  }, clip);
 
   /* Горизонтальные направляющие + подписи Y */
   for (var yi = 0; yi <= yTicks; yi++) {
