@@ -137,7 +137,7 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
             # 429 — лимит. Останавливаемся, не множим запросы.
             if "429" in err or "лимит" in err.lower():
                 skipped = len(to_delete) - i
-                _log(db, action="wb_trash", ok=False,
+                _log(db, action="wb_trash", ok=True,
                      message=f"Лимит WB: остановились после {deleted} удалений, "
                              f"отложено {skipped} карточек на следующий запуск")
                 break
@@ -151,7 +151,7 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
         if i + BATCH_SIZE < len(to_delete):
             time.sleep(PAUSE_SECONDS)
 
-    _log(db, action="wb_trash", ok=(failed == 0 and skipped == 0),
+    _log(db, action="wb_trash", ok=(failed == 0),
          message=f"Очистка корзины WB ({period_label}): обработано {len(to_delete)}, удалено {deleted}"
                  + (f", не удалось {failed}" if failed else "")
                  + (f", отложено {skipped}" if skipped else ""))
