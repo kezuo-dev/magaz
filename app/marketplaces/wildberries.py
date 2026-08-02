@@ -371,23 +371,29 @@ class WBClient(MarketplaceClient):
             )
         return result
 
-    def fetch_cancelled_orders(self) -> list[str]:
+    def fetch_cancelled_orders(self) -> list["CancelledOrderInfo"]:
         """Получить отменённые сборочные задания.
 
-        WB держит отменённые заказы в отдельном эндпоинте /api/v3/orders/cancel.
-        Возвращаем ID отменённых заказов за последнее время.
+        WB держит отменённые заказы в /api/v3/orders/cancel. Если у заказа
+        заполнен supplyId — он был добавлен в поставку, то есть книга физически
+        уехала; при такой отмене остаток не восстанавливаем (already_shipped=True).
         """
+        from app.marketplaces.base import CancelledOrderInfo
         try:
             data = self._request(
                 "GET", f"{MARKETPLACE_URL}/api/v3/orders/cancel"
             )
-            result: list[str] = []
+            result: list[CancelledOrderInfo] = []
             for order in data.get("orders", []):
                 order_id = order.get("id") or order.get("rid")
                 if order_id:
-                    result.append(str(order_id))
+                    already_shipped = bool(order.get("supplyId"))
+                    result.append(CancelledOrderInfo(
+                        external_order_id=str(order_id),
+                        already_shipped=already_shipped,
+                    ))
             return result
         except MarketplaceError:
-            # Если эндпоинт не поддерживается или ошибка доступа — возвращаем пустой список,
-            # не роняя весь процесс. Отмены просто не обработаются в этот раз.
+            # Если эндпоинт не поддерживается — не роняем процесс, отмены
+            # просто не обработаются в этот раз.
             return []

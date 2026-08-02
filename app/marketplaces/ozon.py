@@ -465,19 +465,24 @@ class OzonClient(MarketplaceClient):
             offset += limit
         return result
 
-    def fetch_cancelled_orders(self) -> list[str]:
+    def fetch_cancelled_orders(self) -> list["CancelledOrderInfo"]:
         """Получить отменённые отправления FBS за последние дни.
 
-        Ozon отправления могут быть отменены покупателем или системой. Статус
-        'cancelled' означает, что заказ не будет отгружен — книга должна вернуться
-        в продажу. Используем тот же метод /v3/posting/fbs/list с фильтром статуса.
+        Статус 'cancelled' означает, что заказ не будет отгружен. Запрашиваем
+        историю статусов (status_history=true): если отправление прошло через
+        'awaiting_deliver' или 'delivering' — книга уже передана в доставку,
+        восстанавливать остаток не нужно (already_shipped=True).
         """
         from datetime import datetime, timedelta, timezone
+        from app.marketplaces.base import CancelledOrderInfo
+
+        # Статусы, при которых книга уже физически передана в доставку
+        SHIPPED_STATUSES = {"awaiting_deliver", "delivering", "delivered", "driver_pickup"}
 
         now = datetime.now(timezone.utc)
-        since = now - timedelta(days=7)  # смотрим отмены за неделю
+        since = now - timedelta(days=7)
         fmt = "%Y-%m-%dT%H:%M:%S.000Z"
-        result: list[str] = []
+        result: list[CancelledOrderInfo] = []
         limit = 100
         offset = 0
         while offset < 10000:
@@ -488,21 +493,29 @@ class OzonClient(MarketplaceClient):
                     "filter": {
                         "since": since.strftime(fmt),
                         "to": now.strftime(fmt),
-                        "status": "cancelled",  # только отменённые
+                        "status": "cancelled",
                     },
                     "limit": limit,
                     "offset": offset,
-                    "with": {},
+                    # Запрашиваем историю статусов, чтобы понять,
+                    # была ли книга передана в доставку до отмены.
+                    "with": {"status_history": True},
                 },
             )
             postings = (data.get("result") or {}).get("postings") or []
             for posting in postings:
                 order_number = posting.get("posting_number") or posting.get("order_number")
-                if order_number:
-                    # Возвращаем order_number без артикула — отменяется всё отправление целиком.
-                    # Но в базе у нас ключ = order_number#sku (одна строка на книгу в отправлении).
-                    # Поэтому на стороне обработчика будем искать все заказы, начинающиеся с order_number.
-                    result.append(str(order_number))
+                if not order_number:
+                    continue
+                # Смотрим историю статусов: если был любой «отгрузочный» статус —
+                # книга уже в пути.
+                history = posting.get("status_history") or []
+                past_statuses = {h.get("status") for h in history if h.get("status")}
+                already_shipped = bool(past_statuses & SHIPPED_STATUSES)
+                result.append(CancelledOrderInfo(
+                    external_order_id=str(order_number),
+                    already_shipped=already_shipped,
+                ))
             if len(postings) < limit:
                 break
             offset += limit

@@ -29,6 +29,19 @@ class OrderInfo:
     external_id: str | None = None  # ID лота на площадке, если заказ отдаёт его
 
 
+@dataclass
+class CancelledOrderInfo:
+    """Отменённый заказ с признаком «уже отгружен».
+
+    already_shipped=True означает, что книга была передана в доставку (добавлена
+    в поставку WB или достигла статуса awaiting_deliver/delivering на Ozon).
+    В этом случае физически книга ушла — восстанавливать остаток не нужно.
+    """
+
+    external_order_id: str
+    already_shipped: bool = False
+
+
 class MarketplaceClient:
     """Контракт клиента площадки. Наследники обязаны реализовать все методы.
 
@@ -76,11 +89,11 @@ class MarketplaceClient:
         """Вернуть недавние заказы площадки. Дедупликацию делает вызывающий код."""
         raise NotImplementedError
 
-    def fetch_cancelled_orders(self) -> list[str]:
-        """Вернуть ID отменённых заказов. По умолчанию не реализовано (опционально).
+    def fetch_cancelled_orders(self) -> list[CancelledOrderInfo]:
+        """Вернуть отменённые заказы с признаком отгрузки. По умолчанию — пустой список.
 
-        Возвращает список external_order_id отменённых заказов. Если площадка не
-        поддерживает отслеживание отмен, возвращает пустой список.
+        already_shipped=True: книга уже в пути (добавлена в поставку/передана курьеру),
+        при отмене такого заказа остаток не восстанавливаем.
         """
         return []
 

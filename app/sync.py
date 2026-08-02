@@ -18,6 +18,7 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.marketplaces import MarketplaceError, get_client, is_supported
+from app.marketplaces.base import CancelledOrderInfo
 from app.models import (
     Book,
     BookStatus,
@@ -269,28 +270,29 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
 def process_cancelled_orders(db: Session, marketplace: str) -> int:
     """Обработать отменённые заказы площадки. Возвращает число обработанных отмен.
 
-    Когда заказ отменяется, книга должна вернуться в продажу на всех площадках.
-    Помечаем заказ как отменённый, восстанавливаем лот на площадке продажи в ACTIVE,
-    и восстанавливаем книгу в статус IN_STOCK.
+    Если заказ отменён ДО отгрузки — книга возвращается в продажу (восстанавливаем
+    лот через API и ставим IN_STOCK). Если заказ отменён ПОСЛЕ отгрузки (книга уже
+    в сортцентре/в пути) — помечаем заказ отменённым, но книгу НЕ трогаем: физически
+    её у нас нет, восстанавливать нечего.
     """
     client = _get_active_client(db, marketplace)
     if client is None:
         return 0
 
     try:
-        cancelled_ids = client.fetch_cancelled_orders()
+        cancelled_infos = client.fetch_cancelled_orders()
     except MarketplaceError as exc:
         _log(db, marketplace=marketplace, action="poll_cancellations", ok=False, message=str(exc))
         return 0
 
-    if not cancelled_ids:
+    if not cancelled_infos:
         return 0
 
     processed_count = 0
-    for order_id in cancelled_ids:
-        # Для Ozon: ключ заказа может быть "order_number#sku" (несколько книг в одном
-        # отправлении), но fetch_cancelled_orders возвращает только order_number.
-        # Поэтому ищем все заказы, где external_order_id начинается с order_id или равен ему.
+    for info in cancelled_infos:
+        order_id = info.external_order_id
+        already_shipped = info.already_shipped
+
         orders = db.scalars(
             select(Order).options(selectinload(Order.book).selectinload(Book.listings))
             .where(
@@ -305,29 +307,41 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
 
         for order in orders:
             if not order.book:
-                # Заказ без книги (не смогли сопоставить по SKU) — просто помечаем отменённым.
+                # Заказ без книги — просто помечаем отменённым.
                 order.cancelled = True
                 continue
 
             book = order.book
-            # Восстанавливаем лоты книги в ACTIVE и вызываем API площадки, чтобы
-            # реально вернуть карточку в продажу (разархивировать Ozon / вытащить
-            # WB из корзины + выставить остаток 1). Без API-вызова статус менялся
-            # только локально, а на площадке карточка оставалась снятой.
+
+            if already_shipped:
+                # Книга уже передана в доставку: при отмене заказа она вернётся
+                # на склад площадки, но физически сейчас у нас её нет. Не трогаем
+                # статус — менеджер сам снимет остаток после получения книги обратно.
+                order.cancelled = True
+                processed_count += 1
+                _log(db, marketplace=marketplace, action="order_cancelled",
+                     ok=True, book_id=book.id,
+                     message=(
+                         f"Заказ {order_id} отменён ПОСЛЕ отгрузки: "
+                         f"книга {book.sku} физически в пути — остаток не восстановлен. "
+                         f"Снимите вручную после получения возврата."
+                     ))
+                continue
+
+            # Заказ отменён до отгрузки — восстанавливаем лот и возвращаем книгу.
             for listing in book.listings:
                 if listing.status not in (ListingStatus.WITHDRAWN, ListingStatus.ERROR):
                     continue
                 listing.status = ListingStatus.ACTIVE
                 listing.last_synced_at = utcnow()
                 listing.last_error = None
-                # Пробуем восстановить через API
-                client = _get_active_client(db, listing.marketplace)
-                if client is not None:
+                restore_client = _get_active_client(db, listing.marketplace)
+                if restore_client is not None:
                     try:
-                        client.restore(listing)
+                        restore_client.restore(listing)
                         msg = f"Заказ {order_id} отменён: карточка {book.sku} восстановлена на {listing.marketplace}"
-                        if client.last_warning:
-                            msg += f". {client.last_warning}"
+                        if restore_client.last_warning:
+                            msg += f". {restore_client.last_warning}"
                         _log(db, marketplace=listing.marketplace, action="order_cancelled",
                              ok=True, book_id=book.id, message=msg)
                     except MarketplaceError as exc:
@@ -336,10 +350,7 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
                              ok=False, book_id=book.id,
                              message=f"Заказ {order_id} отменён, но вернуть карточку {book.sku} на {listing.marketplace} не удалось: {exc}")
 
-            # Пересчитываем статус книги. Если есть хотя бы один активный лот —
-            # книга возвращается в продажу.
             refresh_book_status(db, book)
-
             order.cancelled = True
             processed_count += 1
             _log(db, marketplace=marketplace, action="order_cancelled", ok=True, book_id=book.id,
