@@ -220,12 +220,17 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
 
         if book:
             # Снимаем книгу со ВСЕХ площадок (включая ту, где продали).
-            # Используем sell(), а не withdraw(): для Ozon это обнуляет остаток БЕЗ
-            # архивации (чтобы при отмене вернуть в продажу), для WB — обнуляет И
-            # удаляет в корзину. Раньше снимали только с площадки продажи через
-            # withdraw() (с архивацией Ozon) → при отмене из архива не достать.
+            # При выключенном рубильнике (sync_enabled=False) только записываем
+            # продажу в БД — API не трогаем, книгу не снимаем.
+            from app.flags import is_sync_enabled
+            do_sell = is_sync_enabled(db)
             for listing in book.listings:
                 if listing.status == ListingStatus.ACTIVE:
+                    if not do_sell:
+                        # Рубильник выключен — только пишем в журнал, не снимаем
+                        _log(db, marketplace=listing.marketplace, action="sell", ok=True, book_id=book.id,
+                             message=f"Продажа зафиксирована, но синхронизация выключена — лот {listing.marketplace} не тронут")
+                        continue
                     client = _get_active_client(db, listing.marketplace)
                     if client is None:
                         listing.status = ListingStatus.WITHDRAWN
