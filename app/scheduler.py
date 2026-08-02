@@ -198,9 +198,8 @@ def start_scheduler() -> None:
     )
     _scheduler.add_job(
         cleanup_wb_trash,
-        trigger="cron",
-        hour=19,  # 22:00 МСК = 19:00 UTC
-        minute=0,
+        trigger="interval",
+        minutes=30,
         id="wb_trash_cleanup",
         max_instances=1,
         coalesce=True,
