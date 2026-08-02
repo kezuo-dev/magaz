@@ -19,17 +19,24 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from app.forbidden_check import ForbiddenMatch
 
 
-def generate_forbidden_pdf(results: list[ForbiddenMatch]) -> bytes:
-    """Сгенерировать PDF-отчёт со списком найденных книг. Возвращает байты PDF."""
-    # Регистрируем DejaVuSans для кириллицы. reportlab ищет шрифт в своей папке
-    # fonts/ или в системных путях. В докер-образе установим пакет fonts-dejavu.
+def _load_fonts() -> tuple[str, str]:
+    """Зарегистрировать DejaVuSans и вернуть (normal_font, bold_font).
+
+    На сервере (Docker + fonts-dejavu) шрифт есть — кириллица отображается
+    корректно. На маке без шрифта — падаем обратно на Helvetica, кириллица
+    не отобразится, но PDF не упадёт с исключением.
+    """
     try:
         pdfmetrics.registerFont(TTFont("DejaVuSans", "DejaVuSans.ttf"))
         pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", "DejaVuSans-Bold.ttf"))
+        return "DejaVuSans", "DejaVuSans-Bold"
     except Exception:
-        # Если шрифт не найден — fallback на Helvetica (кириллицу не покажет, но
-        # PDF не упадёт). В проде должен быть установлен fonts-dejavu в образе.
-        pass
+        return "Helvetica", "Helvetica-Bold"
+
+
+def generate_forbidden_pdf(results: list[ForbiddenMatch]) -> bytes:
+    """Сгенерировать PDF-отчёт со списком найденных книг. Возвращает байты PDF."""
+    font_normal, font_bold = _load_fonts()
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -41,12 +48,12 @@ def generate_forbidden_pdf(results: list[ForbiddenMatch]) -> bytes:
         bottomMargin=2 * cm,
     )
 
-    # Стили текста с DejaVuSans
+    # Стили текста
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         "CustomTitle",
         parent=styles["Heading1"],
-        fontName="DejaVuSans-Bold",
+        fontName=font_bold,
         fontSize=16,
         textColor=colors.HexColor("#1a1a1a"),
         spaceAfter=12,
@@ -54,7 +61,7 @@ def generate_forbidden_pdf(results: list[ForbiddenMatch]) -> bytes:
     normal_style = ParagraphStyle(
         "CustomNormal",
         parent=styles["Normal"],
-        fontName="DejaVuSans",
+        fontName=font_normal,
         fontSize=9,
         textColor=colors.HexColor("#333333"),
     )
@@ -94,11 +101,11 @@ def generate_forbidden_pdf(results: list[ForbiddenMatch]) -> bytes:
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f0f0")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1a1a1a")),
-                    ("FONTNAME", (0, 0), (-1, 0), "DejaVuSans-Bold"),
+                    ("FONTNAME", (0, 0), (-1, 0), font_bold),
                     ("FONTSIZE", (0, 0), (-1, 0), 9),
                     ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
                     ("TOPPADDING", (0, 0), (-1, 0), 8),
-                    ("FONTNAME", (0, 1), (-1, -1), "DejaVuSans"),
+                    ("FONTNAME", (0, 1), (-1, -1), font_normal),
                     ("FONTSIZE", (0, 1), (-1, -1), 8),
                     ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -122,11 +129,7 @@ def generate_catalog_pdf(books: list, subtitle: str = "Все книги") -> by
     books    — список ORM-объектов Book (с загруженными listings).
     subtitle — строка-описание фильтра, печатается под заголовком.
     """
-    try:
-        pdfmetrics.registerFont(TTFont("DejaVuSans", "DejaVuSans.ttf"))
-        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", "DejaVuSans-Bold.ttf"))
-    except Exception:
-        pass
+    font_normal, font_bold = _load_fonts()
 
     _MP_SHORT = {"ozon": "OZ", "wildberries": "WB"}
     _STATUS_LABELS = {
@@ -150,7 +153,7 @@ def generate_catalog_pdf(books: list, subtitle: str = "Все книги") -> by
     title_style = ParagraphStyle(
         "CatalogTitle",
         parent=styles["Heading1"],
-        fontName="DejaVuSans-Bold",
+        fontName=font_bold,
         fontSize=16,
         textColor=colors.HexColor("#1a1a1a"),
         spaceAfter=6,
@@ -158,7 +161,7 @@ def generate_catalog_pdf(books: list, subtitle: str = "Все книги") -> by
     sub_style = ParagraphStyle(
         "CatalogSub",
         parent=styles["Normal"],
-        fontName="DejaVuSans",
+        fontName=font_normal,
         fontSize=9,
         textColor=colors.HexColor("#666666"),
         spaceAfter=4,
@@ -166,7 +169,7 @@ def generate_catalog_pdf(books: list, subtitle: str = "Все книги") -> by
     normal_style = ParagraphStyle(
         "CatalogNormal",
         parent=styles["Normal"],
-        fontName="DejaVuSans",
+        fontName=font_normal,
         fontSize=8,
         textColor=colors.HexColor("#333333"),
     )
@@ -202,11 +205,11 @@ def generate_catalog_pdf(books: list, subtitle: str = "Все книги") -> by
         table.setStyle(TableStyle([
             ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#f0f0f0")),
             ("TEXTCOLOR",     (0, 0), (-1, 0), colors.HexColor("#1a1a1a")),
-            ("FONTNAME",      (0, 0), (-1, 0), "DejaVuSans-Bold"),
+            ("FONTNAME",      (0, 0), (-1, 0), font_bold),
             ("FONTSIZE",      (0, 0), (-1, 0), 9),
             ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
             ("TOPPADDING",    (0, 0), (-1, 0), 8),
-            ("FONTNAME",      (0, 1), (-1, -1), "DejaVuSans"),
+            ("FONTNAME",      (0, 1), (-1, -1), font_normal),
             ("FONTSIZE",      (0, 1), (-1, -1), 8),
             ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
             ("VALIGN",        (0, 0), (-1, -1), "TOP"),
