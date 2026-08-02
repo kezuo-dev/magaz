@@ -130,7 +130,7 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
             )
             for book, listing, nm in batch:
                 deleted += 1
-                _log(db, action="wb_trash", ok=True, book_id=book.id,
+                _log(db, action="wb_trash", ok=True,
                      message=f"Карточка {nm} удалена в корзину WB")
         except MarketplaceError as exc:
             err = str(exc)
@@ -144,7 +144,7 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
             # Другая ошибка — пишем и идём дальше
             for book, listing, nm in batch:
                 failed += 1
-                _log(db, action="wb_trash", ok=False, book_id=book.id,
+                _log(db, action="wb_trash", ok=False,
                      message=f"Не удалось удалить карточку {nm} в корзину WB: {exc}")
 
         # Пауза между пачками (кроме последней)
