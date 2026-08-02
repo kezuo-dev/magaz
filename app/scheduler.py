@@ -31,11 +31,13 @@ _scheduler: BackgroundScheduler | None = None
 
 
 def poll_all_marketplaces() -> None:
-    """Один проход опроса по всем включённым площадкам. Ошибки не роняют планировщик."""
+    """Опрос заказов — работает всегда, даже при выключенном рубильнике.
+
+    Записывает продажи в БД для аналитики. Реальное кросс-снятие блокируется
+    отдельным флагом auto_withdraw, а не sync_enabled.
+    """
     db = SessionLocal()
     try:
-        if not is_sync_enabled(db):
-            return
         enabled = db.scalars(
             select(MarketplaceAccount.marketplace).where(MarketplaceAccount.enabled == True)  # noqa: E712
         ).all()
@@ -51,7 +53,10 @@ def poll_all_marketplaces() -> None:
 
 
 def poll_all_cancellations() -> None:
-    """Один проход проверки отменённых заказов по всем включённым площадкам."""
+    """Проверка отменённых заказов — только при включённом рубильнике.
+
+    Вызывает restore API площадки — это действие, не наблюдение.
+    """
     db = SessionLocal()
     try:
         if not is_sync_enabled(db):
@@ -71,7 +76,10 @@ def poll_all_cancellations() -> None:
 
 
 def watch_all_marketplaces_stocks() -> None:
-    """Один проход слежения за остатками наших книг по всем включённым площадкам."""
+    """Слежение за остатками — только при включённом рубильнике.
+
+    Может инициировать снятие книги через withdraw API.
+    """
     db = SessionLocal()
     try:
         if not is_sync_enabled(db):
@@ -88,11 +96,13 @@ def watch_all_marketplaces_stocks() -> None:
 
 
 def sync_all_catalogs() -> None:
-    """Один проход полной сверки каталога по всем включённым площадкам."""
+    """Сверка каталога — работает всегда, даже при выключенном рубильнике.
+
+    Добавляет новые книги и обновляет статусы. API снятия при этом НЕ вызывается
+    (_cross_withdraw меняет только локальные статусы без вызова withdraw API).
+    """
     db = SessionLocal()
     try:
-        if not is_sync_enabled(db):
-            return
         results = sync_all(db)
         if results:
             logger.info("Сверка каталога: %s", results)
