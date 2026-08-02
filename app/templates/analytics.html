@@ -134,13 +134,12 @@ var AN = {
           {% if s.author %}<span class="row-sub">{{ s.author }}</span>{% endif %}
         </td>
         <td>
-          <span class="mp mp-active"
+          <span class="mp mp-active" title="{{ s.marketplace }}"
             {% if s.mp_key == 'wildberries' %}style="background:#cb11ab;color:#fff"
             {% elif s.mp_key == 'ozon' %}style="background:#005bff;color:#fff"
             {% endif %}>
             {{ 'WB' if s.mp_key == 'wildberries' else 'OZ' if s.mp_key == 'ozon' else s.mp_key[:2].upper() }}
           </span>
-          <span style="font-size:13px;color:var(--ink-soft);margin-left:6px">{{ s.marketplace }}</span>
         </td>
         <td style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">
           {% if s.price %}{{ "%.0f ₽" | format(s.price) }}{% else %}—{% endif %}
