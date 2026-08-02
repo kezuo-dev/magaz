@@ -129,8 +129,11 @@ def _build_stats(db: Session) -> dict:
 
 
 @router.get("", response_class=HTMLResponse)
-def analytics_page(request: Request):
-    return templates.TemplateResponse(request, "analytics_stub.html", {"error": None})
+def analytics_page(request: Request, db: Session = Depends(get_db)):
+    # Пароль снят — открываем сразу. Чтобы залочить обратно: заменить на
+    #   return templates.TemplateResponse(request, "analytics_stub.html", {"error": None})
+    stats = _build_stats(db)
+    return templates.TemplateResponse(request, "analytics.html", {"stats": stats})
 
 
 @router.post("", response_class=HTMLResponse)
