@@ -210,9 +210,10 @@ class WBClient(MarketplaceClient):
         """Вернуть карточку WB в продажу после отмены заказа.
 
         Шаг 1 — восстановить из корзины через /content/v2/cards/recover.
+        WB отдаёт 400 если карточка не в корзине — это нормально (заказ мог
+        быть отменён до того, как мы успели убрать в корзину). Такой случай
+        молча пропускаем. Реальные ошибки (сеть, 401, 5xx) — предупреждение.
         Шаг 2 — выставить остаток 1 по баркоду (stock_key).
-        Если восстановление из корзины не прошло — предупреждение, остаток
-        всё равно выставляем.
         """
         self.last_warning = None
         external_id = listing.external_id
@@ -223,12 +224,17 @@ class WBClient(MarketplaceClient):
             try:
                 self._restore_from_trash(external_id)
             except MarketplaceError as exc:
-                self.last_warning = (
-                    f"Не удалось восстановить карточку {external_id} из корзины: {exc}. "
-                    "Остаток выставлен, карточка может остаться в корзине."
-                )
-                import logging
-                logging.getLogger("wildberries").warning(self.last_warning)
+                err = str(exc)
+                if "400" in err or "bad request" in err.lower():
+                    # Карточки не было в корзине — ничего восстанавливать не нужно.
+                    pass
+                else:
+                    self.last_warning = (
+                        f"Не удалось восстановить карточку {external_id} из корзины: {exc}. "
+                        "Остаток выставлен, карточка может остаться в корзине."
+                    )
+                    import logging
+                    logging.getLogger("wildberries").warning(self.last_warning)
 
         # Шаг 2: выставляем остаток 1
         if not barcode:
