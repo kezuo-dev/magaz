@@ -153,7 +153,7 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
             db,
             marketplace=marketplace,
             action="reconcile_withdrawn",
-            ok=False,
+            ok=True,
             book_id=book.id,
             message=(
                 f"Книга {book.sku}: помечена как снятая, но на {marketplace} всё ещё "
