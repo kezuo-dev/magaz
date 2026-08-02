@@ -19,6 +19,7 @@ from sqlalchemy import select
 from app.catalog_sync import sync_all, watch_all_stocks
 from app.config import settings
 from app.db import SessionLocal
+from app.flags import is_sync_enabled
 from app.models import MarketplaceAccount
 from app.reconciliation import reconcile_all_marketplaces
 from app.sync import poll_marketplace_orders, process_cancelled_orders
@@ -33,6 +34,8 @@ def poll_all_marketplaces() -> None:
     """Один проход опроса по всем включённым площадкам. Ошибки не роняют планировщик."""
     db = SessionLocal()
     try:
+        if not is_sync_enabled(db):
+            return
         enabled = db.scalars(
             select(MarketplaceAccount.marketplace).where(MarketplaceAccount.enabled == True)  # noqa: E712
         ).all()
@@ -51,6 +54,8 @@ def poll_all_cancellations() -> None:
     """Один проход проверки отменённых заказов по всем включённым площадкам."""
     db = SessionLocal()
     try:
+        if not is_sync_enabled(db):
+            return
         enabled = db.scalars(
             select(MarketplaceAccount.marketplace).where(MarketplaceAccount.enabled == True)  # noqa: E712
         ).all()
@@ -66,14 +71,11 @@ def poll_all_cancellations() -> None:
 
 
 def watch_all_marketplaces_stocks() -> None:
-    """Один проход слежения за остатками наших книг по всем включённым площадкам.
-
-    Дёшево (спрашиваем остатки только по нашим ключам), поэтому идёт часто. Остаток
-    0 / пропавшая карточка → кросс-снятие. watch_all_stocks сам коммитит и не роняет
-    планировщик на сбое.
-    """
+    """Один проход слежения за остатками наших книг по всем включённым площадкам."""
     db = SessionLocal()
     try:
+        if not is_sync_enabled(db):
+            return
         results = watch_all_stocks(db)
         removed = sum(r.get("removed", 0) for r in results.values() if isinstance(r, dict))
         if removed:
@@ -86,14 +88,11 @@ def watch_all_marketplaces_stocks() -> None:
 
 
 def sync_all_catalogs() -> None:
-    """Один проход полной сверки каталога по всем включённым площадкам.
-
-    Тяжелее опроса заказов (тянет все карточки), поэтому идёт по своему, более
-    редкому интервалу. Находит НОВЫЕ книги и снимает пропавшие. sync_all сам
-    коммитит и не роняет планировщик на сбое.
-    """
+    """Один проход полной сверки каталога по всем включённым площадкам."""
     db = SessionLocal()
     try:
+        if not is_sync_enabled(db):
+            return
         results = sync_all(db)
         if results:
             logger.info("Сверка каталога: %s", results)
@@ -112,6 +111,8 @@ def reconcile_all_withdrawn() -> None:
     """
     db = SessionLocal()
     try:
+        if not is_sync_enabled(db):
+            return
         results = reconcile_all_marketplaces(db)
         db.commit()
         if results:
@@ -131,6 +132,8 @@ def cleanup_wb_trash() -> None:
     """
     db = SessionLocal()
     try:
+        if not is_sync_enabled(db):
+            return
         result = move_withdrawn_to_trash(db, days=1)  # только за последние сутки
         db.commit()
         processed = result.get("processed", 0)

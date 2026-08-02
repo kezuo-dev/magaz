@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.flags import is_auto_withdraw_enabled, set_auto_withdraw
+from app.flags import is_auto_withdraw_enabled, set_auto_withdraw, is_sync_enabled, set_sync_enabled
 from app.marketplaces import MarketplaceError, get_client, is_supported
 from app.models import Marketplace, MarketplaceAccount, SyncLog
 from app.security import decrypt_credentials, encrypt_credentials
@@ -37,7 +37,7 @@ def _accounts_by_mp(db: Session) -> dict[str, MarketplaceAccount]:
 
 
 @router.get("", response_class=HTMLResponse)
-def settings_page(request: Request, db: Session = Depends(get_db), saved: str = "", checked: str = "", withdraw: str = ""):
+def settings_page(request: Request, db: Session = Depends(get_db), saved: str = "", checked: str = "", withdraw: str = "", sync: str = ""):
     accounts = _accounts_by_mp(db)
     cards = []
     for mp in Marketplace:
@@ -61,8 +61,24 @@ def settings_page(request: Request, db: Session = Depends(get_db), saved: str = 
             "checked": checked,
             "withdraw": withdraw,
             "auto_withdraw": is_auto_withdraw_enabled(db),
+            "sync_enabled": is_sync_enabled(db),
+            "sync": sync,
         },
     )
+
+
+@router.post("/sync-enabled")
+def toggle_sync_enabled(
+    db: Session = Depends(get_db),
+    enabled: str = Form(""),
+):
+    """Главный рубильник: включить/выключить все фоновые задачи синхронизации."""
+    on = enabled == "on"
+    set_sync_enabled(db, on)
+    db.add(SyncLog(marketplace=None, action="sync_enabled_toggle", ok=True,
+                   message="Синхронизация включена" if on else "Синхронизация остановлена"))
+    db.commit()
+    return RedirectResponse(f"/settings?sync={'on' if on else 'off'}", status_code=303)
 
 
 @router.post("/auto-withdraw")

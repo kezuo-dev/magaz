@@ -1,11 +1,12 @@
 """Глобальные переключатели приложения, меняемые в UI на лету.
 
-Пока один флаг — «Автоснятие с продажи» (auto_withdraw). Мониторинг (сверка,
-статусы, опрос заказов, слежение за остатками) работает всегда. А вот реальное
-снятие книги с ДРУГИХ площадок при продаже/пропаже включается этим рубильником.
+Два флага:
+- sync_enabled   — главный рубильник: останавливает ВСЕ фоновые задачи
+                   (сверку, опрос заказов, остатки, корзину WB).
+- auto_withdraw  — кросс-снятие: когда книга продалась на одной площадке,
+                   снимать её с остальных. Работает только при sync_enabled=True.
 
-По умолчанию ВЫКЛ: после установки программа сначала просто показывает каталог и
-статусы, а хозяин осознанно включает автоматику, когда убедился, что всё верно.
+По умолчанию оба ВЫКЛ.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AppSetting
 
+SYNC_ENABLED_KEY = "sync_enabled"
 AUTO_WITHDRAW_KEY = "auto_withdraw"
 
 
@@ -30,6 +32,15 @@ def set_flag(db: Session, key: str, value: bool) -> None:
         row = AppSetting(key=key)
         db.add(row)
     row.value = "1" if value else "0"
+
+
+def is_sync_enabled(db: Session) -> bool:
+    """Главный рубильник — все фоновые задачи. По умолчанию ВЫКЛ."""
+    return get_flag(db, SYNC_ENABLED_KEY, default=False)
+
+
+def set_sync_enabled(db: Session, on: bool) -> None:
+    set_flag(db, SYNC_ENABLED_KEY, on)
 
 
 def is_auto_withdraw_enabled(db: Session) -> bool:

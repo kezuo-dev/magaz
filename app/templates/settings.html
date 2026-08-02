@@ -10,6 +10,8 @@
 
 <div class="notice-stack">
   {% if saved %}<div class="notice ok"><span>Настройки «{{ marketplace_label(saved) }}» сохранены.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if sync == 'on' %}<div class="notice ok"><span>Синхронизация включена — все фоновые задачи запущены.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if sync == 'off' %}<div class="notice err"><span>Синхронизация остановлена — все фоновые задачи на паузе.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
   {% if withdraw == 'on' %}<div class="notice ok"><span>Автоснятие включено — программа снимает проданные книги с других площадок.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
   {% if withdraw == 'off' %}<div class="notice ok"><span>Автоснятие выключено — программа только показывает статусы, ничего не снимает.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
   {% if checked and ':' in checked %}
@@ -23,6 +25,28 @@
       <div class="notice err"><span>{{ marketplace_label(mp) }}: подключиться не удалось. Подробности в журнале.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>
     {% endif %}
   {% endif %}
+</div>
+
+<div class="kill-switch {{ 'on' if sync_enabled else 'off' }}" style="margin-bottom:8px">
+  <div class="kill-switch-text">
+    <div class="kill-switch-title">
+      Синхронизация с площадками
+    </div>
+    <p class="muted">
+      {% if sync_enabled %}
+        Включена. Все фоновые задачи работают: опрос заказов, остатки, сверка каталога, корзина WB.
+      {% else %}
+        <b>Остановлена.</b> Все фоновые задачи на паузе — программа не обращается к площадкам.
+      {% endif %}
+    </p>
+  </div>
+  <form method="post" action="/settings/sync-enabled" class="kill-switch-form" id="sync-enabled-form">
+    <label class="switch-row">
+      <input type="checkbox" name="enabled" value="on" class="switch-input"
+             {{ 'checked' if sync_enabled else '' }} onchange="document.getElementById('sync-enabled-form').submit()">
+      <span class="switch"></span>
+    </label>
+  </form>
 </div>
 
 <div class="kill-switch {{ 'on' if auto_withdraw else 'off' }}">
