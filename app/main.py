@@ -1,19 +1,18 @@
-"""Точка входа. FastAPI + сессии + вход по паролю + подключение роутов."""
+"""Точка входа. FastAPI + сессии + вход по телефону + подключение роутов."""
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.access import SECTION_TITLES, section_for_path
+from app.bootstrap import ensure_owner
 from app.config import BASE_DIR, HTTPS_ONLY, settings
 from app.db import Base, engine, ensure_schema, get_db
 from app.models import User, UserRole
 from app.scheduler import start_scheduler, stop_scheduler
-from app.security import check_password
 from app.tunnel import start_tunnel, stop_tunnel
 from app.templating import templates
 from app.routes import catalog, imports, log, settings as settings_routes, analytics, live, auth
@@ -28,6 +27,7 @@ logging.basicConfig(
 # Создаём таблицы при старте (для дев-режима на SQLite; на проде — alembic).
 Base.metadata.create_all(bind=engine)
 ensure_schema()  # дописываем недостающие колонки в уже существующие таблицы
+ensure_owner()   # заводим учётную запись владельца, если её ещё нет
 
 
 @asynccontextmanager
@@ -53,33 +53,8 @@ static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
-# Разделы, закрытые отдельным паролем ПОВЕРХ общего входа. Замок разовый: стоит
-# уйти из раздела — доступ снова закрывается и пароль нужно вводить заново.
-# Действует только на пути владельца (вход по общему паролю). Пользователь с
-# ролью «Руководитель» проходит по роли — отдельный пароль ему не нужен.
-ADMIN_SECTIONS = {
-    "settings": "/settings",
-}
-
-# Подписи для страницы ввода второго пароля.
-ADMIN_SECTION_TITLES = {"settings": "Настройкам"}
-
-
-def _admin_section_for(path: str) -> str | None:
-    """Какому разделу с отдельным паролем принадлежит путь (или None).
-
-    Отдельно от access.section_for_path: там разделы для ролей, здесь — только
-    те, что закрыты вторым паролем. /login не попадает под /log, потому что
-    сверяем точный префикс либо префикс + '/'.
-    """
-    for name, prefix in ADMIN_SECTIONS.items():
-        if path == prefix or path.startswith(prefix + "/"):
-            return name
-    return None
-
-
 def _load_session_user(request: Request) -> User | None:
-    """Пользователь из сессии, или None если вход был по общему паролю.
+    """Пользователь из сессии (или None, если сессия пустая/учётку удалили).
 
     Своя сессия БД: middleware не роут, зависимости FastAPI здесь не работают.
     """
@@ -95,60 +70,37 @@ def _load_session_user(request: Request) -> User | None:
 
 @app.middleware("http")
 async def require_login(request: Request, call_next):
-    """Пускаем внутрь только после входа. Открыты: логин, регистрация, статика.
+    """Пускаем внутрь только после входа. Открыты: вход, регистрация, статика.
 
-    Два способа войти:
-    - общий пароль (/login) — путь владельца, полный доступ, Настройки под вторым
-      паролем (admin_password);
-    - телефон + пароль (/user-login) — доступ по роли, см. ROLE_SECTIONS.
-
-    Общий пароль оставлен, чтобы не потерять доступ на уже работающем проде и было
-    чем одобрить первую заявку: пользователей в базе изначально нет.
+    Вход один — по телефону и паролю (см. routes/auth.py). Что человеку доступно,
+    решает его роль (ROLE_SECTIONS): раздел Настройки открыт только владельцу.
     """
-    open_paths = (
-        "/login", "/static", "/logout", "/admin-login",
-        "/register", "/register-done", "/user-login", "/user-logout",
-    )
+    open_paths = ("/login", "/logout", "/register", "/register-done", "/static")
     path = request.url.path
 
     if path.startswith(open_paths):
         return await call_next(request)
-    if not request.session.get("authed"):
-        return RedirectResponse("/login", status_code=303)
 
     user = _load_session_user(request)
+    if user is None:
+        # Не вошли, либо учётку удалили уже после входа.
+        request.session.clear()
+        return RedirectResponse("/login", status_code=303)
+
+    # Права могли отобрать уже после входа — проверяем на каждом запросе.
+    if user.role == UserRole.PENDING:
+        request.session.clear()
+        return RedirectResponse("/login?error=pending", status_code=303)
+
     request.state.user = user
 
-    if user is not None:
-        # Вход по телефону — доступ решает роль. Заявку и удалённого пользователя
-        # выкидываем сразу: права могли отобрать уже после входа.
-        if user.role == UserRole.PENDING:
-            request.session.clear()
-            return RedirectResponse("/user-login?error=pending", status_code=303)
-
-        section = section_for_path(path)
-        if section is not None and not user.can(section):
-            return templates.TemplateResponse(
-                request, "no_access.html",
-                {"section_title": SECTION_TITLES.get(section, section), "user": user},
-                status_code=403,
-            )
-        return await call_next(request)
-
-    if request.session.get("user_id"):
-        # user_id в сессии есть, а пользователя в базе нет — учётку удалили.
-        request.session.clear()
-        return RedirectResponse("/user-login", status_code=303)
-
-    # Путь владельца (общий пароль): Настройки под вторым паролем.
-    section = _admin_section_for(path)
-    if section is None:
-        # Ушли из защищённых разделов — сбрасываем разовую разблокировку.
-        request.session.pop("admin_unlocked", None)
-        return await call_next(request)
-
-    if request.session.get("admin_unlocked") != section:
-        return RedirectResponse(f"/admin-login?next={path}", status_code=303)
+    section = section_for_path(path)
+    if section is not None and not user.can(section):
+        return templates.TemplateResponse(
+            request, "no_access.html",
+            {"section_title": SECTION_TITLES.get(section, section), "user": user},
+            status_code=403,
+        )
     return await call_next(request)
 
 
@@ -161,63 +113,6 @@ app.add_middleware(
     https_only=HTTPS_ONLY,
     same_site="lax",
 )
-
-
-@app.get("/login", response_class=HTMLResponse)
-def login_form(request: Request):
-    return templates.TemplateResponse(request, "login.html", {"error": None})
-
-
-@app.post("/login")
-def login(request: Request, password: str = Form(...)):
-    if check_password(password):
-        # clear() перед входом: если до этого в сессии сидел пользователь с ролью,
-        # его user_id остался бы и общий пароль дал бы права ЕГО роли, а не полные.
-        request.session.clear()
-        request.session["authed"] = True
-        return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(
-        request, "login.html", {"error": "Неверный пароль"}, status_code=401
-    )
-
-
-@app.get("/logout")
-def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse("/login", status_code=303)
-
-
-def _safe_next(next_path: str) -> str:
-    """Разрешаем переход только на внутренний защищённый раздел (защита от open redirect)."""
-    if _admin_section_for(next_path):
-        return next_path
-    return "/settings"
-
-
-@app.get("/admin-login", response_class=HTMLResponse)
-def admin_login_form(request: Request, next: str = "/settings"):
-    target = _safe_next(next)
-    return templates.TemplateResponse(
-        request,
-        "admin_login.html",
-        {"error": None, "next": target, "title": ADMIN_SECTION_TITLES.get(_admin_section_for(target), "разделу")},
-    )
-
-
-@app.post("/admin-login")
-def admin_login(request: Request, password: str = Form(...), next: str = Form("/settings")):
-    target = _safe_next(next)
-    section = _admin_section_for(target)
-    if password == settings.admin_password:
-        # Разблокируем ровно тот раздел, куда идём. Другой раздел останется закрытым.
-        request.session["admin_unlocked"] = section
-        return RedirectResponse(target, status_code=303)
-    return templates.TemplateResponse(
-        request,
-        "admin_login.html",
-        {"error": "Неверный пароль", "next": target, "title": ADMIN_SECTION_TITLES.get(section, "разделу")},
-        status_code=401,
-    )
 
 
 app.include_router(auth.router)

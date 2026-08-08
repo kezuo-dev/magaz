@@ -4,16 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Букинист{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css?v=18">
+  <link rel="stylesheet" href="/static/style.css?v=19">
 </head>
 <body>
-  {% if request.session.get('authed') %}
-  {% set path = request.url.path %}
-  {# Вошедший пользователь (вход по телефону) или None (вход по общему паролю —
-     тогда доступно всё). can() решает, показывать ли ссылку: закрытые разделы
-     не показываем вовсе, чтобы не вести человека на страницу «нет доступа». #}
+  {# Вошедший пользователь. Вход один — по телефону, поэтому me есть всегда,
+     когда человек внутри программы. На страницах входа/регистрации me нет —
+     тогда рисуем только содержимое, без меню. #}
   {% set me = request.state.user if request.state.user is defined else None %}
-  {% macro allowed(section) %}{{ 'yes' if me is none or me.can(section) else '' }}{% endmacro %}
+  {% if me %}
+  {% set path = request.url.path %}
+  {# can() решает, показывать ли ссылку: закрытые разделы не показываем вовсе,
+     чтобы не вести человека на страницу «нет доступа». #}
+  {% macro allowed(section) %}{{ 'yes' if me.can(section) else '' }}{% endmacro %}
   <div class="layout">
     <aside class="sidebar">
       <a href="/" class="brand">📚 <span>Букинист</span></a>
@@ -24,8 +26,8 @@
         {% if allowed('log') %}<a href="/log" class="{{ 'active' if path.startswith('/log') else '' }}"><span>Журнал</span></a>{% endif %}
         {% if allowed('settings') %}<a href="/settings" class="{{ 'active' if path.startswith('/settings') else '' }}"><span>Настройки</span></a>{% endif %}
       </nav>
-      {% if me %}<div class="side-user"><span>{{ me.full_name or me.phone_pretty }}</span><small>{{ me.role_label }}</small></div>{% endif %}
-      <a href="{{ '/user-logout' if me else '/logout' }}" class="logout"><span>Выход</span></a>
+      <div class="side-user"><span>{{ me.full_name or me.phone_pretty }}</span><small>{{ me.role_label }}</small></div>
+      <a href="/logout" class="logout"><span>Выход</span></a>
     </aside>
     <main>
       {% block content %}{% endblock %}

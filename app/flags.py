@@ -50,29 +50,3 @@ def is_auto_withdraw_enabled(db: Session) -> bool:
 
 def set_auto_withdraw(db: Session, on: bool) -> None:
     set_flag(db, AUTO_WITHDRAW_KEY, on)
-
-
-# Ссылка на таблицу ответов Google-формы (опубликованная как CSV). Хранится тут же,
-# в настройках, а не в .env — чтобы менять из интерфейса без перезапуска.
-FORM_CSV_URL_KEY = "google_form_csv_url"
-
-
-def get_text_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.get(AppSetting, key)
-    return row.value if row is not None else default
-
-
-def set_text_setting(db: Session, key: str, value: str) -> None:
-    row = db.get(AppSetting, key)
-    if row is None:
-        row = AppSetting(key=key)
-        db.add(row)
-    row.value = value
-
-
-def get_form_csv_url(db: Session) -> str:
-    return get_text_setting(db, FORM_CSV_URL_KEY)
-
-
-def set_form_csv_url(db: Session, url: str) -> None:
-    set_text_setting(db, FORM_CSV_URL_KEY, url.strip())

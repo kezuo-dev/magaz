@@ -34,10 +34,6 @@ def decrypt_credentials(token: str) -> dict:
     return json.loads(_fernet.decrypt(token.encode()).decode())
 
 
-def check_password(password: str) -> bool:
-    return password == settings.app_password
-
-
 # --- Хеширование паролей пользователей ---
 
 def hash_password(password: str) -> str:

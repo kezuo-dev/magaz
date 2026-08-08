@@ -13,132 +13,103 @@
 </div>
 
 <div class="notice-stack">
-  {% if notice %}<div class="notice ok"><span>{{ notice }}</span><button class="notice-close" type="button">×</button></div>{% endif %}
-  {% if error %}<div class="notice err"><span>{{ error }}</span><button class="notice-close" type="button">×</button></div>{% endif %}
+  {% if notice %}<div class="notice ok"><span>{{ notice }}</span><button class="notice-close" type="button" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if error %}<div class="notice err"><span>{{ error }}</span><button class="notice-close" type="button" aria-label="Закрыть">&times;</button></div>{% endif %}
 </div>
 
-<div class="form-import">
-  <h2>Заявки из Google-формы</h2>
-  <p class="muted form-import-lead">
-    Сотрудник заполняет вашу Google-форму (ФИО, должность, телефон, пароль), а программа
-    сама подтягивает ответы и заводит из них заявки. Пароль сразу превращается в хеш —
-    в открытом виде он нигде не хранится. Ниже — что настроить один раз и как загружать новых людей.
-  </p>
-
+<div class="users-intro">
+  <h2>Как получить доступ к программе</h2>
   <ol class="guide">
     <li>
-      <b>Один раз: опубликуйте ответы формы как таблицу CSV.</b>
-      Откройте таблицу с ответами (в редакторе формы — вкладка «Ответы» → зелёная кнопка
-      «Посмотреть ответы в Таблицах»). Дальше в самой таблице:
-      <ol class="guide-sub">
-        <li>В верхнем меню нажмите <b>Файл</b>, затем <b>Открыть доступ</b> → <b>Опубликовать в интернете</b>. Откроется окно с двумя выпадающими списками.</li>
-        <li><b>Первый (верхний) список</b> — что публикуем. Выберите в нём лист с ответами, он обычно называется <b>«Ответы на форму (1)»</b> (не оставляйте «Весь документ»).</li>
-        <li><b>Второй (нижний) список</b> — в каком формате. Выберите <b>«Значения, разделённые запятыми (.csv)»</b> вместо «Веб-страница».</li>
-        <li>Нажмите синюю кнопку <b>Опубликовать</b>, подтвердите. Появится ссылка вида <span class="mono">https://docs.google.com/…/pub?output=csv</span> — скопируйте её целиком.</li>
-      </ol>
+      <b>Сотрудник регистрируется сам.</b>
+      Дайте ему ссылку на страницу <span class="mono">/register</span>. Там он вводит телефон,
+      ФИО и придумывает пароль. Пароль сразу превращается в хеш — в открытом виде он нигде
+      не хранится, и вы его не увидите.
     </li>
     <li>
-      <b>Один раз: вставьте ссылку сюда.</b>
-      Вставьте скопированную ссылку в поле ниже и нажмите <b>«Сохранить ссылку»</b>.
-      Программа запомнит её и будет ходить по ней автоматически.
+      <b>Он появляется здесь со статусом «Заявка».</b>
+      Войти в программу он пока не может — доступа у заявки нет вообще.
     </li>
     <li>
-      <b>Дальше всё само.</b>
-      Каждые 5 минут программа сама скачивает новые ответы и добавляет их в список заявок ниже.
-      Отдельно ничего нажимать не нужно — новый сотрудник появится здесь в течение пяти минут
-      после заполнения формы.
-    </li>
-    <li>
-      <b>Нужно прямо сейчас — нажмите «Загрузить заявки сейчас».</b>
-      Кнопка подтягивает ответы немедленно, не дожидаясь автоматической проверки. Повторные
-      нажатия безопасны: уже загруженные люди не задваиваются (сверяем по телефону).
-    </li>
-    <li>
-      <b>Выдайте роль.</b>
-      Новый человек приходит со статусом «Заявка» и войти пока не может. В его карточке ниже
-      выберите роль (Наблюдатель, Менеджер или Администратор) — сразу после этого он сможет
-      войти по своему телефону и паролю.
+      <b>Вы выдаёте роль.</b>
+      В карточке ниже выберите роль в списке — она применяется сразу, отдельно сохранять не нужно.
+      После этого человек входит по своему телефону и паролю.
     </li>
   </ol>
 
-  <div class="guide-note muted">
-    Ссылка должна быть именно <b>опубликованной</b> (public CSV). Приватную таблицу программа
-    прочитать не сможет — для неё нужны ключи Google API, это сложнее. Если форма для своих,
-    публичного CSV достаточно.
-  </div>
-
-  <form method="post" action="/settings/users/form-url" class="form-url-row">
-    <label class="field">
-      <span class="field-label">Ссылка на опубликованный CSV с ответами формы</span>
-      <input type="url" name="csv_url" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv"
-             value="{{ form_csv_url or '' }}">
-    </label>
-    <button type="submit">Сохранить ссылку</button>
-  </form>
-
-  <div class="form-import-actions">
-    <form method="post" action="/settings/users/import">
-      <button type="submit" class="secondary" {{ 'disabled' if not form_csv_url else '' }}>Загрузить заявки сейчас</button>
-    </form>
-    {% if form_csv_url %}
-      <span class="status-dot on"><i></i>Ссылка сохранена, автозагрузка каждые 5 минут</span>
-    {% else %}
-      <span class="muted">Сначала сохраните ссылку выше</span>
-    {% endif %}
+  <div class="roles-legend">
+    <div class="role-item">
+      <b>Сотрудник</b>
+      <span class="muted">Каталог и Аналитика — только смотрит</span>
+    </div>
+    <div class="role-item">
+      <b>Менеджер</b>
+      <span class="muted">Плюс Обновление каталога и Журнал</span>
+    </div>
+    <div class="role-item">
+      <b>Владелец</b>
+      <span class="muted">Полный доступ, включая Настройки. Только вы, выдать нельзя</span>
+    </div>
   </div>
 </div>
 
-<h2 class="section-h">Все пользователи</h2>
+<h2 class="section-h">Все пользователи ({{ users|length }})</h2>
 
 <div class="users-list">
   {% for user in users %}
-  <div class="user-card {{ 'pending' if user.role == 'pending' else '' }}">
+  <div class="user-card {{ 'pending' if user.role == 'pending' else '' }} {{ 'owner' if user.role == 'admin' else '' }}">
     <div class="user-info">
-      <div class="user-name">{{ user.full_name }}</div>
+      <div class="user-name">
+        {{ user.full_name or 'Без имени' }}
+        {% if user.role == 'admin' %}<span class="owner-badge">Владелец</span>{% endif %}
+      </div>
       <div class="user-phone muted">{{ user.phone_pretty }}</div>
-      {% if user.comment %}
-      <div class="user-comment muted">{{ user.comment }}</div>
-      {% endif %}
       <div class="user-meta muted">
         Зарегистрирован {{ user.created_at.strftime('%d.%m.%Y %H:%M') }}
-        {% if user.last_login_at %} · Последний вход {{ user.last_login_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}
+        {% if user.last_login_at %} · Последний вход {{ user.last_login_at.strftime('%d.%m.%Y %H:%M') }}
+        {% else %} · Ещё не входил{% endif %}
       </div>
     </div>
-    <form method="post" action="/settings/users/{{ user.id }}/role" class="user-role-form">
-      <label class="field">
-        <span class="field-label">Роль</span>
-        <select name="role" onchange="this.form.submit()">
-          <option value="pending" {{ 'selected' if user.role == 'pending' else '' }}>{{ role_labels['pending'] }}</option>
-          <option value="viewer" {{ 'selected' if user.role == 'viewer' else '' }}>{{ role_labels['viewer'] }}</option>
-          <option value="manager" {{ 'selected' if user.role == 'manager' else '' }}>{{ role_labels['manager'] }}</option>
-          <option value="admin" {{ 'selected' if user.role == 'admin' else '' }}>{{ role_labels['admin'] }}</option>
-        </select>
-      </label>
-    </form>
+
+    <div class="user-actions">
+      {% if user.role == 'admin' %}
+        <span class="muted owner-note">Роль владельца изменить нельзя</span>
+      {% else %}
+        <form method="post" action="/settings/users/{{ user.id }}/role" class="user-role-form">
+          <label class="field">
+            <span class="field-label">Роль</span>
+            <select name="role" onchange="this.form.submit()">
+              {% for role in assignable_roles %}
+              <option value="{{ role }}" {{ 'selected' if user.role == role else '' }}>{{ role_labels[role] }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </form>
+        <form method="post" action="/settings/users/{{ user.id }}/delete"
+              onsubmit="return confirm('Удалить {{ user.full_name or user.phone_pretty }}? Он потеряет доступ к программе.')">
+          <button type="submit" class="ghost-danger">Удалить</button>
+        </form>
+      {% endif %}
+    </div>
   </div>
   {% endfor %}
 </div>
 
 <style>
-.form-import {
+.users-intro {
   margin-bottom: 24px;
-  padding: 20px;
+  padding: 22px 24px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
-.form-import h2 {
-  margin: 0 0 8px;
+.users-intro h2 {
+  margin: 0 0 14px;
   font-size: 18px;
 }
-.form-import-lead {
-  font-size: 14px;
-  line-height: 1.55;
-  margin: 0 0 16px;
-}
 .guide {
-  margin: 0 0 16px;
+  margin: 0;
   padding-left: 22px;
   display: grid;
   gap: 10px;
@@ -148,114 +119,86 @@
   line-height: 1.55;
   color: var(--ink-soft);
 }
-.guide li b {
-  color: var(--ink);
-}
-.guide-sub {
-  margin: 8px 0 0;
-  padding-left: 20px;
+.guide li b { color: var(--ink); }
+.roles-legend {
   display: grid;
-  gap: 6px;
-  list-style: lower-alpha;
-}
-.guide-sub li {
-  font-size: 13.5px;
-  line-height: 1.5;
-  color: var(--ink-soft);
-}
-.guide-note {
-  font-size: 13px;
-  line-height: 1.5;
-  padding: 12px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  margin-bottom: 20px;
-}
-.form-url-row {
-  display: flex;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
-  align-items: flex-end;
-  margin-top: 4px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
 }
-.form-url-row .field {
-  flex: 1;
+.role-item {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  margin: 0;
+  gap: 3px;
+  font-size: 13.5px;
 }
-.form-url-row input {
-  width: 100%;
-}
-.form-import-actions {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-top: 14px;
-  flex-wrap: wrap;
-}
-.users-list {
-  display: grid;
-  gap: 16px;
-}
+.role-item .muted { font-size: 13px; line-height: 1.45; }
+
+.users-list { display: grid; gap: 14px; }
 .user-card {
   display: grid;
   grid-template-columns: 1fr auto;
+  align-items: center;
   gap: 24px;
-  padding: 20px;
+  padding: 18px 22px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
   transition: box-shadow .15s ease;
 }
-.user-card:hover {
-  box-shadow: var(--shadow-md);
-}
-.user-card.pending {
-  border-color: var(--warn);
-  background: var(--warn-soft);
-}
-.user-info {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+.user-card:hover { box-shadow: var(--shadow-md); }
+.user-card.pending { border-left: 4px solid var(--warn); background: var(--warn-soft); }
+.user-card.owner { border-left: 4px solid var(--accent); }
+.user-info { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .user-name {
-  font-weight: 600;
-  font-size: 16px;
-}
-.user-phone {
-  font-size: 14px;
-}
-.user-comment {
-  font-size: 14px;
-  font-style: italic;
-  margin-top: 4px;
-}
-.user-meta {
-  font-size: 13px;
-  margin-top: 4px;
-}
-.user-role-form {
   display: flex;
   align-items: center;
+  gap: 9px;
+  font-weight: 600;
+  font-size: 16px;
+  flex-wrap: wrap;
 }
+.owner-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid #cdd5fb;
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.user-phone { font-size: 14px; }
+.user-meta { font-size: 12.5px; }
+.user-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.user-role-form { margin: 0; }
 .user-role-form .field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 0;
 }
-.user-role-form select {
-  min-width: 180px;
+.user-role-form select { min-width: 190px; }
+.owner-note { font-size: 13px; }
+
+@media (max-width: 720px) {
+  .user-card { grid-template-columns: 1fr; }
+  .user-actions { align-items: stretch; }
 }
 </style>
 <script>
-  document.querySelectorAll('.notice-close').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      btn.closest('.notice').remove();
+  document.querySelectorAll(".notice-close").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      btn.closest(".notice").remove();
     });
   });
 </script>

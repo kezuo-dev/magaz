@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head">
-  <h1>Заявка отправлена</h1>
-  <p class="page-sub muted">Ваша заявка на доступ принята. Администратор проверит её и одобрит в ближайшее время.</p>
-</div>
+<div class="auth-wrap auth-wrap--solo">
+  <div class="auth-card auth-card--center">
+    <div class="auth-icon">✅</div>
+    <div class="auth-head">
+      <h1>Готово</h1>
+      <p>Учётная запись создана. Войти можно будет сразу после того, как владелец
+         выдаст вам роль — обычно это быстро.</p>
+    </div>
 
-<div class="notice ok" style="margin-top:32px">
-  <span>Вы получите доступ после одобрения. Попробуйте войти позже — если заявка одобрена, вход откроется.</span>
+    <a href="/login" class="btn auth-btn-wide">Попробовать войти</a>
+  </div>
 </div>
-
-<p style="margin-top:24px">
-  <a href="/user-login">Попробовать войти</a>
-</p>
 {% endblock %}

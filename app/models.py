@@ -192,10 +192,14 @@ class MarketplaceAccount(Base):
 class UserRole(str, Enum):
     """Роль пользователя = уровень доступа. Порядок важен: чем ниже, тем больше прав.
 
-    - PENDING — заявка из Google-формы, ещё не одобрена. Войти НЕ может.
+    - PENDING — заявка после регистрации, ещё не одобрена. Войти НЕ может.
     - VIEWER  — только смотрит каталог и аналитику.
     - MANAGER — плюс обновление каталога и журнал.
     - ADMIN   — всё, включая Настройки (ключи площадок, рубильники, пользователи).
+
+    ADMIN — роль владельца. Заводится один раз при старте (см. app/bootstrap.py)
+    и НЕ выдаётся через интерфейс: в списке ролей её нет, назначить её кому-то
+    ещё нельзя. Так владелец остаётся единственным.
     """
 
     PENDING = "pending"
@@ -209,8 +213,12 @@ ROLE_LABELS = {
     "pending": "Заявка (нет доступа)",
     "viewer": "Сотрудник",
     "manager": "Менеджер",
-    "admin": "Руководитель",
+    "admin": "Владелец",
 }
+
+# Роли, которые можно выдать через интерфейс. ADMIN сюда намеренно не входит —
+# владелец один, и повысить кого-то до владельца из UI нельзя.
+ASSIGNABLE_ROLES = ("pending", "viewer", "manager")
 
 # Какие разделы видит и открывает каждая роль. Ключи — имена разделов из
 # app/access.py. Заявка (pending) не входит в программу вообще.
@@ -223,11 +231,11 @@ ROLE_SECTIONS = {
 
 
 class User(Base):
-    """Пользователь программы. Заводится сам через Google-форму, права даёт админ.
+    """Пользователь программы. Регистрируется сам на /register, права даёт владелец.
 
-    Вход по номеру телефона + пароль, который человек придумал в форме. Телефон
-    храним в нормализованном виде (только цифры, 11 знаков, начинается с 7) —
-    иначе «+7 999...» и «8999...» были бы разными пользователями.
+    Вход по номеру телефона + пароль, который человек придумал при регистрации.
+    Телефон храним в нормализованном виде (только цифры, 11 знаков, начинается
+    с 7) — иначе «+7 999...» и «8999...» были бы разными пользователями.
     """
 
     __tablename__ = "users"
@@ -237,11 +245,8 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255), default="")
     password_hash: Mapped[str] = mapped_column(String(255), default="")
     role: Mapped[str] = mapped_column(String(16), default=UserRole.PENDING, index=True)
-    # Откуда пришёл: form (Google-форма) или manual (создан вручную/первый админ).
-    source: Mapped[str] = mapped_column(String(16), default="form")
-    # ID ответа в Google-таблице — защита от повторного импорта одной и той же строки.
-    form_response_id: Mapped[str | None] = mapped_column(String(128), index=True, default=None)
-    comment: Mapped[str | None] = mapped_column(Text, default=None)  # что человек написал о себе
+    # Откуда пришёл: self (сам зарегистрировался) или owner (владелец из bootstrap).
+    source: Mapped[str] = mapped_column(String(16), default="self")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(

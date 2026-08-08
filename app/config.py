@@ -16,11 +16,15 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite:///{DATA_DIR / 'magaz.db'}"
     secret_key: str = "change-me"
     fernet_key: str = ""
-    app_password: str = "changeme"
     # Отдельный пароль для полной очистки каталога — разрушительная операция.
     wipe_password: str = "2601"
-    # Пароль для чувствительных разделов (Журнал, Настройки с ключами площадок).
-    admin_password: str = "1908"
+
+    # Учётная запись владельца. Создаётся один раз при старте (app/bootstrap.py),
+    # это единственная роль ADMIN. Если владелец уже есть в базе, эти значения
+    # больше не применяются — сменить пароль можно только в самой программе.
+    owner_phone: str = "+79822798700"
+    owner_password: str = "admin74"
+    owner_name: str = "Владелец"
     # Базовый публичный адрес, по которому площадки скачивают фото. Если включён
     # туннель (см. ниже), он перезапишет это значение выданным https-адресом.
     public_base_url: str = "http://localhost:8000"
