@@ -12,7 +12,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import ASSIGNABLE_ROLES, ROLE_LABELS, User, UserRole, utcnow
+from app.models import (
+    ASSIGNABLE_ROLES,
+    ROLE_DESCRIPTIONS,
+    ROLE_LABELS,
+    ROLE_ORDER,
+    User,
+    UserRole,
+    utcnow,
+)
 from app.security import hash_password, normalize_phone, verify_password
 from app.templating import templates
 
@@ -112,14 +120,36 @@ def logout(request: Request):
 
 @router.get("/settings/users", response_class=HTMLResponse)
 def users_list(request: Request, db: Session = Depends(get_db), notice: str = "", error: str = ""):
-    """Список пользователей. Доступ только у владельца (проверяет middleware)."""
+    """Список пользователей, сгруппированный по ролям от высшей к низшей.
+
+    Группируем на стороне сервера, а не в шаблоне: порядок ролей задан один раз
+    в ROLE_ORDER (models.py), и шаблон просто рисует то, что пришло.
+    """
     users = db.scalars(select(User).order_by(User.created_at.desc())).all()
+
+    # Внутри группы порядок наследуется от запроса — новые сверху.
+    groups = []
+    for role in ROLE_ORDER:
+        members = [u for u in users if u.role == role]
+        if not members:
+            continue
+        groups.append(
+            {
+                "role": role,
+                "label": ROLE_LABELS.get(role, role),
+                "description": ROLE_DESCRIPTIONS.get(role, ""),
+                "users": members,
+            }
+        )
+
     return templates.TemplateResponse(
         request,
         "users.html",
         {
-            "users": users,
+            "groups": groups,
+            "total": len(users),
             "role_labels": ROLE_LABELS,
+            "role_descriptions": ROLE_DESCRIPTIONS,
             "assignable_roles": ASSIGNABLE_ROLES,
             "notice": notice or None,
             "error": error or None,

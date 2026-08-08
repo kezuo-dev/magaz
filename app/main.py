@@ -73,7 +73,8 @@ async def require_login(request: Request, call_next):
     """Пускаем внутрь только после входа. Открыты: вход, регистрация, статика.
 
     Вход один — по телефону и паролю (см. routes/auth.py). Что человеку доступно,
-    решает его роль (ROLE_SECTIONS): раздел Настройки открыт только владельцу.
+    решает его роль (ROLE_SECTIONS): раздел Настройки открыт владельцу и
+    руководителю, остальным — нет.
     """
     open_paths = ("/login", "/logout", "/register", "/register-done", "/static")
     path = request.url.path

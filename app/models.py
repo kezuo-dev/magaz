@@ -190,21 +190,26 @@ class MarketplaceAccount(Base):
 
 
 class UserRole(str, Enum):
-    """Роль пользователя = уровень доступа. Порядок важен: чем ниже, тем больше прав.
+    """Роль пользователя = уровень доступа.
 
     - PENDING — заявка после регистрации, ещё не одобрена. Войти НЕ может.
     - VIEWER  — только смотрит каталог и аналитику.
     - MANAGER — плюс обновление каталога и журнал.
-    - ADMIN   — всё, включая Настройки (ключи площадок, рубильники, пользователи).
+    - CHIEF   — руководитель: полный доступ, как у владельца, включая Настройки.
+    - ADMIN   — владелец. Права те же, что у руководителя, но роль неприкосновенна.
 
     ADMIN — роль владельца. Заводится один раз при старте (см. app/bootstrap.py)
     и НЕ выдаётся через интерфейс: в списке ролей её нет, назначить её кому-то
-    ещё нельзя. Так владелец остаётся единственным.
+    ещё нельзя, снять с владельца тоже. Так владелец остаётся единственным.
+
+    CHIEF нужен, чтобы у владельца был помощник с теми же возможностями, но без
+    статуса владельца: руководителя можно выдать и снять через интерфейс.
     """
 
     PENDING = "pending"
     VIEWER = "viewer"
     MANAGER = "manager"
+    CHIEF = "chief"
     ADMIN = "admin"
 
 
@@ -213,19 +218,39 @@ ROLE_LABELS = {
     "pending": "Заявка (нет доступа)",
     "viewer": "Сотрудник",
     "manager": "Менеджер",
+    "chief": "Руководитель",
     "admin": "Владелец",
 }
 
+# Короткое описание прав — для списка пользователей и подсказок.
+ROLE_DESCRIPTIONS = {
+    "pending": "Ждёт одобрения, войти не может",
+    "viewer": "Каталог и Аналитика — только смотрит",
+    "manager": "Плюс Обновление каталога и Журнал",
+    "chief": "Полный доступ, включая Настройки и пользователей",
+    "admin": "Полный доступ. Роль неприкосновенна и не выдаётся",
+}
+
+# Роли от высшей к низшей. Один источник порядка: по нему сортируется список
+# пользователей и строится выпадающий список ролей.
+ROLE_ORDER = ("admin", "chief", "manager", "viewer", "pending")
+
+# Вес роли для сортировки: 0 — самая высокая.
+ROLE_RANK = {role: index for index, role in enumerate(ROLE_ORDER)}
+
 # Роли, которые можно выдать через интерфейс. ADMIN сюда намеренно не входит —
 # владелец один, и повысить кого-то до владельца из UI нельзя.
-ASSIGNABLE_ROLES = ("pending", "viewer", "manager")
+ASSIGNABLE_ROLES = ("chief", "manager", "viewer", "pending")
 
 # Какие разделы видит и открывает каждая роль. Ключи — имена разделов из
 # app/access.py. Заявка (pending) не входит в программу вообще.
+# У chief набор совпадает с admin: разница между ними только в неприкосновенности
+# самой роли, а не в доступе к разделам.
 ROLE_SECTIONS = {
     "pending": set(),
     "viewer": {"catalog", "analytics"},
     "manager": {"catalog", "analytics", "imports", "log"},
+    "chief": {"catalog", "analytics", "imports", "log", "settings"},
     "admin": {"catalog", "analytics", "imports", "log", "settings"},
 }
 
@@ -256,6 +281,20 @@ class User(Base):
     @property
     def role_label(self) -> str:
         return ROLE_LABELS.get(self.role, self.role)
+
+    @property
+    def role_description(self) -> str:
+        return ROLE_DESCRIPTIONS.get(self.role, "")
+
+    @property
+    def role_rank(self) -> int:
+        """Вес роли для сортировки: 0 — владелец. Неизвестную роль кладём в конец."""
+        return ROLE_RANK.get(self.role, len(ROLE_ORDER))
+
+    @property
+    def is_owner(self) -> bool:
+        """Владелец — единственная неприкосновенная запись (роль не меняется)."""
+        return self.role == UserRole.ADMIN
 
     @property
     def phone_pretty(self) -> str:
