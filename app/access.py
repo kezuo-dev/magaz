@@ -16,7 +16,7 @@ SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
     ("analytics", "Аналитика", ("/analytics", "/api/live/analytics")),
     ("imports", "Импорт", ("/import",)),
     ("log", "Журнал", ("/log", "/api/live/log")),
-    ("settings", "Настройки", ("/settings", "/users")),
+    ("settings", "Настройки", ("/settings",)),
 ]
 
 # Быстрый поиск: имя → (подпись, префиксы).

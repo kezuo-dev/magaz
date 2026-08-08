@@ -99,7 +99,7 @@ def user_logout(request: Request):
     return RedirectResponse("/user-login", status_code=303)
 
 
-@router.get("/users", response_class=HTMLResponse)
+@router.get("/settings/users", response_class=HTMLResponse)
 def users_list(request: Request, db: Session = Depends(get_db), notice: str = "", error: str = ""):
     """Список пользователей (только для админов). Показывает все заявки и активных."""
     # Проверка роли будет в middleware — здесь предполагаем, что админ уже пропущен.
@@ -117,7 +117,7 @@ def users_list(request: Request, db: Session = Depends(get_db), notice: str = ""
     )
 
 
-@router.post("/users/{user_id}/role")
+@router.post("/settings/users/{user_id}/role")
 def change_role(
     user_id: int,
     db: Session = Depends(get_db),
@@ -128,29 +128,29 @@ def change_role(
     if user and role in [r.value for r in UserRole]:
         user.role = role
         db.commit()
-    return RedirectResponse("/users", status_code=303)
+    return RedirectResponse("/settings/users", status_code=303)
 
 
-@router.post("/users/form-url")
+@router.post("/settings/users/form-url")
 def save_form_url(db: Session = Depends(get_db), csv_url: str = Form("")):
     """Сохранить ссылку на опубликованный CSV с ответами Google-формы."""
     set_form_csv_url(db, csv_url)
     db.commit()
-    return RedirectResponse("/users?notice=Ссылка+сохранена", status_code=303)
+    return RedirectResponse("/settings/users?notice=Ссылка+сохранена", status_code=303)
 
 
-@router.post("/users/import")
+@router.post("/settings/users/import")
 def import_from_form(db: Session = Depends(get_db)):
     """Скачать ответы формы и завести новые заявки (роль pending)."""
     csv_url = get_form_csv_url(db)
     if not csv_url:
-        return RedirectResponse("/users?error=Сначала+сохраните+ссылку+на+форму", status_code=303)
+        return RedirectResponse("/settings/users?error=Сначала+сохраните+ссылку+на+форму", status_code=303)
     try:
         result = google_forms.import_applications(db, csv_url)
     except Exception as exc:  # noqa: BLE001 — показываем причину пользователю
-        return RedirectResponse(f"/users?error=Не+удалось+загрузить:+{exc}", status_code=303)
+        return RedirectResponse(f"/settings/users?error=Не+удалось+загрузить:+{exc}", status_code=303)
 
     parts = [f"Добавлено заявок: {result['added']}", f"пропущено: {result['skipped']}"]
     if result["errors"]:
         parts.append(f"с ошибками: {len(result['errors'])}")
-    return RedirectResponse(f"/users?notice={'; '.join(parts)}", status_code=303)
+    return RedirectResponse(f"/settings/users?notice={'; '.join(parts)}", status_code=303)

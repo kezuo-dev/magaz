@@ -59,11 +59,10 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 # ролью «Руководитель» проходит по роли — отдельный пароль ему не нужен.
 ADMIN_SECTIONS = {
     "settings": "/settings",
-    "users": "/users",
 }
 
 # Подписи для страницы ввода второго пароля.
-ADMIN_SECTION_TITLES = {"settings": "Настройкам", "users": "Пользователям"}
+ADMIN_SECTION_TITLES = {"settings": "Настройкам"}
 
 
 def _admin_section_for(path: str) -> str | None:
