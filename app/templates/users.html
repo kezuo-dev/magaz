@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Пользователи</h1>
+  <p class="page-sub muted">Управление заявками и правами доступа. Одобрите заявку, чтобы пользователь мог войти.</p>
+</div>
+
+{% if notice %}<div class="notice ok">{{ notice }}<button class="notice-close" type="button">×</button></div>{% endif %}
+{% if error %}<div class="notice err">{{ error }}<button class="notice-close" type="button">×</button></div>{% endif %}
+
+<div class="form-import">
+  <h2>Заявки из Google-формы</h2>
+  <p class="muted">
+    Люди заполняют форму, программа скачивает ответы и заводит заявки. Пароль сразу
+    хешируется — в открытом виде нигде не сохраняется. Чтобы это работало, откройте
+    таблицу ответов формы → Файл → Поделиться → Опубликовать в интернете → выберите
+    лист ответов и формат CSV → вставьте полученную ссылку сюда.
+  </p>
+  <form method="post" action="/users/form-url" class="form-url-row">
+    <input type="url" name="csv_url" placeholder="Ссылка на CSV с ответами формы"
+           value="{{ form_csv_url or '' }}">
+    <button type="submit">Сохранить ссылку</button>
+  </form>
+  <form method="post" action="/users/import" class="form-import-run">
+    <button type="submit" {{ 'disabled' if not form_csv_url else '' }}>Загрузить заявки</button>
+    {% if not form_csv_url %}<span class="muted">Сначала сохраните ссылку</span>{% endif %}
+  </form>
+</div>
+
+<div class="users-list">
+  {% for user in users %}
+  <div class="user-card {{ 'pending' if user.role == 'pending' else '' }}">
+    <div class="user-info">
+      <div class="user-name">{{ user.full_name }}</div>
+      <div class="user-phone muted">{{ user.phone_pretty }}</div>
+      {% if user.comment %}
+      <div class="user-comment muted">{{ user.comment }}</div>
+      {% endif %}
+      <div class="user-meta muted">
+        Зарегистрирован {{ user.created_at.strftime('%d.%m.%Y %H:%M') }}
+        {% if user.last_login_at %} · Последний вход {{ user.last_login_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}
+      </div>
+    </div>
+    <form method="post" action="/users/{{ user.id }}/role" class="user-role-form">
+      <label class="field">
+        <span class="field-label">Роль</span>
+        <select name="role" onchange="this.form.submit()">
+          <option value="pending" {{ 'selected' if user.role == 'pending' else '' }}>{{ role_labels['pending'] }}</option>
+          <option value="viewer" {{ 'selected' if user.role == 'viewer' else '' }}>{{ role_labels['viewer'] }}</option>
+          <option value="manager" {{ 'selected' if user.role == 'manager' else '' }}>{{ role_labels['manager'] }}</option>
+          <option value="admin" {{ 'selected' if user.role == 'admin' else '' }}>{{ role_labels['admin'] }}</option>
+        </select>
+      </label>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+
+<style>
+.users-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+.user-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  padding: 20px;
+  background: #0f131c;
+  border: 1px solid #1e2636;
+  border-radius: 12px;
+}
+.user-card.pending {
+  border-color: #e9a568;
+  background: #1a1510;
+}
+.user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.user-name {
+  font-weight: 600;
+  font-size: 16px;
+}
+.user-phone {
+  font-size: 14px;
+}
+.user-comment {
+  font-size: 14px;
+  font-style: italic;
+  margin-top: 4px;
+}
+.user-meta {
+  font-size: 13px;
+  margin-top: 4px;
+}
+.user-role-form {
+  display: flex;
+  align-items: center;
+}
+.user-role-form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+.user-role-form .field-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #9ca3af;
+}
+.user-role-form select {
+  padding: 8px 12px;
+  border: 1px solid #2a2f3a;
+  border-radius: 6px;
+  background: #05070c;
+  color: #e5e7eb;
+  font-size: 14px;
+  cursor: pointer;
+  min-width: 180px;
+}
+.user-role-form select:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+.form-import {
+  margin-top: 24px;
+  padding: 20px;
+  background: #0f131c;
+  border: 1px solid #1e2636;
+  border-radius: 12px;
+}
+.form-import h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.form-import .muted {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.form-url-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+.form-url-row input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #2a2f3a;
+  border-radius: 6px;
+  background: #05070c;
+  color: #e5e7eb;
+  font-size: 14px;
+}
+.form-url-row input:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+.form-url-row button,
+.form-import-run button {
+  padding: 8px 16px;
+  border: 1px solid #2a2f3a;
+  border-radius: 6px;
+  background: #1e2636;
+  color: #e5e7eb;
+  font-size: 14px;
+  cursor: pointer;
+}
+.form-url-row button:hover,
+.form-import-run button:hover:not(:disabled) {
+  border-color: #38bdf8;
+}
+.form-import-run {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.form-import-run button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.notice {
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-top: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.notice.ok {
+  background: #0f2417;
+  border: 1px solid #1f6f43;
+  color: #86efac;
+}
+.notice.err {
+  background: #2a1215;
+  border: 1px solid #7f1d1d;
+  color: #fca5a5;
+}
+.notice-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+</style>
+<script>
+  document.querySelectorAll('.notice-close').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      btn.closest('.notice').remove();
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Нет доступа</h1>
+    <p class="page-sub muted">Раздел «{{ section_title }}» закрыт для вашей роли.</p>
+  </div>
+</div>
+
+<div class="notice err" style="margin-top:8px">
+  <span>Ваша роль — «{{ user.role_label }}». Чтобы открыть этот раздел, попросите руководителя изменить права.</span>
+</div>
+
+<p style="margin-top:24px"><a href="/">Вернуться в каталог</a></p>
+{% endblock %}

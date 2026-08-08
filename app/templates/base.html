@@ -9,17 +9,26 @@
 <body>
   {% if request.session.get('authed') %}
   {% set path = request.url.path %}
+  {# Вошедший пользователь (вход по телефону) или None (вход по общему паролю —
+     тогда доступно всё). can() решает, показывать ли ссылку: закрытые разделы
+     не показываем вовсе, чтобы не вести человека на страницу «нет доступа». #}
+  {% set me = request.state.user if request.state.user is defined else None %}
+  {% macro allowed(section) %}{{ 'yes' if me is none or me.can(section) else '' }}{% endmacro %}
   <div class="layout">
     <aside class="sidebar">
       <a href="/" class="brand">📚 <span>Букинист</span></a>
       <nav>
-        <a href="/" class="{{ 'active' if path == '/' or path.startswith('/books/') else '' }}"><span>Каталог</span></a>
-        <a href="/analytics" class="{{ 'active' if path.startswith('/analytics') else '' }}"><span>Аналитика</span></a>
-        <a href="/import" class="{{ 'active' if path.startswith('/import') else '' }}"><span>Обновление каталога</span></a>
-        <a href="/log" class="{{ 'active' if path.startswith('/log') else '' }}"><span>Журнал</span></a>
+        {% if allowed('catalog') %}<a href="/" class="{{ 'active' if path == '/' or path.startswith('/books/') else '' }}"><span>Каталог</span></a>{% endif %}
+        {% if allowed('analytics') %}<a href="/analytics" class="{{ 'active' if path.startswith('/analytics') else '' }}"><span>Аналитика</span></a>{% endif %}
+        {% if allowed('imports') %}<a href="/import" class="{{ 'active' if path.startswith('/import') else '' }}"><span>Обновление каталога</span></a>{% endif %}
+        {% if allowed('log') %}<a href="/log" class="{{ 'active' if path.startswith('/log') else '' }}"><span>Журнал</span></a>{% endif %}
+        {% if allowed('settings') %}
         <a href="/settings" class="{{ 'active' if path.startswith('/settings') else '' }}"><span>Настройки</span></a>
+        <a href="/users" class="{{ 'active' if path.startswith('/users') else '' }}"><span>Пользователи</span></a>
+        {% endif %}
       </nav>
-      <a href="/logout" class="logout"><span>Выход</span></a>
+      {% if me %}<div class="side-user"><span>{{ me.full_name or me.phone_pretty }}</span><small>{{ me.role_label }}</small></div>{% endif %}
+      <a href="{{ '/user-logout' if me else '/logout' }}" class="logout"><span>Выход</span></a>
     </aside>
     <main>
       {% block content %}{% endblock %}

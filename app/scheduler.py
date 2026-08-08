@@ -19,7 +19,8 @@ from sqlalchemy import select
 from app.catalog_sync import sync_all, watch_all_stocks
 from app.config import settings
 from app.db import SessionLocal
-from app.flags import is_sync_enabled
+from app.flags import get_form_csv_url, is_sync_enabled
+from app.google_forms import import_applications
 from app.models import MarketplaceAccount
 from app.reconciliation import reconcile_all_marketplaces
 from app.sync import poll_marketplace_orders, process_cancelled_orders
@@ -161,6 +162,30 @@ def cleanup_wb_trash() -> None:
         db.close()
 
 
+def import_form_applications() -> None:
+    """Автозагрузка заявок из Google-формы (CSV) — работает всегда.
+
+    Если ссылка на опубликованный CSV не задана, тихо выходим. Новые ответы
+    формы заводятся как заявки (pending); повторная загрузка не плодит дубли —
+    дедупликация живёт в google_forms.import_applications.
+    """
+    db = SessionLocal()
+    try:
+        csv_url = get_form_csv_url(db)
+        if not csv_url:
+            return
+        result = import_applications(db, csv_url)
+        db.commit()
+        added = result.get("added", 0)
+        if added:
+            logger.info("Автозагрузка заявок из формы: %s", result)
+    except Exception:  # noqa: BLE001 — сбой загрузки не должен ронять планировщик
+        db.rollback()
+        logger.exception("Сбой автозагрузки заявок из формы")
+    finally:
+        db.close()
+
+
 def start_scheduler() -> None:
     global _scheduler
     if not settings.scheduler_enabled or _scheduler is not None:
@@ -214,9 +239,18 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    _scheduler.add_job(
+        import_form_applications,
+        trigger="interval",
+        minutes=5,  # каждые 5 минут подтягиваем новые ответы формы
+        id="form_applications",
+        max_instances=1,
+        coalesce=True,
+    )
     _scheduler.start()
     logger.info(
-        "Планировщик запущен: заказы %s мин, остатки %s мин, сверка каталога %s мин, сверка снятых 10 мин, очистка корзины WB в 00:00 МСК",
+        "Планировщик запущен: заказы %s мин, остатки %s мин, сверка каталога %s мин, "
+        "сверка снятых 10 мин, очистка корзины WB в 00:00 МСК, заявки из формы 5 мин",
         settings.poll_interval_minutes,
         settings.stock_watch_interval_minutes,
         settings.catalog_sync_interval_minutes,

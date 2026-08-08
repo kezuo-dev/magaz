@@ -189,6 +189,81 @@ class MarketplaceAccount(Base):
     )
 
 
+class UserRole(str, Enum):
+    """Роль пользователя = уровень доступа. Порядок важен: чем ниже, тем больше прав.
+
+    - PENDING — заявка из Google-формы, ещё не одобрена. Войти НЕ может.
+    - VIEWER  — только смотрит каталог и аналитику.
+    - MANAGER — плюс обновление каталога и журнал.
+    - ADMIN   — всё, включая Настройки (ключи площадок, рубильники, пользователи).
+    """
+
+    PENDING = "pending"
+    VIEWER = "viewer"
+    MANAGER = "manager"
+    ADMIN = "admin"
+
+
+# Подписи ролей для интерфейса.
+ROLE_LABELS = {
+    "pending": "Заявка (нет доступа)",
+    "viewer": "Сотрудник",
+    "manager": "Менеджер",
+    "admin": "Руководитель",
+}
+
+# Какие разделы видит и открывает каждая роль. Ключи — имена разделов из
+# app/access.py. Заявка (pending) не входит в программу вообще.
+ROLE_SECTIONS = {
+    "pending": set(),
+    "viewer": {"catalog", "analytics"},
+    "manager": {"catalog", "analytics", "imports", "log"},
+    "admin": {"catalog", "analytics", "imports", "log", "settings"},
+}
+
+
+class User(Base):
+    """Пользователь программы. Заводится сам через Google-форму, права даёт админ.
+
+    Вход по номеру телефона + пароль, который человек придумал в форме. Телефон
+    храним в нормализованном виде (только цифры, 11 знаков, начинается с 7) —
+    иначе «+7 999...» и «8999...» были бы разными пользователями.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    phone: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(255), default="")
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
+    role: Mapped[str] = mapped_column(String(16), default=UserRole.PENDING, index=True)
+    # Откуда пришёл: form (Google-форма) или manual (создан вручную/первый админ).
+    source: Mapped[str] = mapped_column(String(16), default="form")
+    # ID ответа в Google-таблице — защита от повторного импорта одной и той же строки.
+    form_response_id: Mapped[str | None] = mapped_column(String(128), index=True, default=None)
+    comment: Mapped[str | None] = mapped_column(Text, default=None)  # что человек написал о себе
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    @property
+    def role_label(self) -> str:
+        return ROLE_LABELS.get(self.role, self.role)
+
+    @property
+    def phone_pretty(self) -> str:
+        """+7 (999) 123-45-67 из 79991234567."""
+        p = self.phone or ""
+        if len(p) == 11:
+            return f"+{p[0]} ({p[1:4]}) {p[4:7]}-{p[7:9]}-{p[9:11]}"
+        return p
+
+    def can(self, section: str) -> bool:
+        return section in ROLE_SECTIONS.get(self.role, set())
+
+
 class AppSetting(Base):
     """Простое key-value хранилище глобальных настроек приложения.
 
