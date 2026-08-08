@@ -1,57 +1,41 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="auth-wrap">
-  <aside class="auth-aside">
-    <a href="/" class="auth-aside-brand">📚 <span>Букинист</span></a>
-    <div class="auth-aside-body">
-      <h2>Присоединяйтесь к команде</h2>
-      <p>Заведите учётную запись, чтобы вести каталог книг на Ozon и Wildberries из одного места.</p>
-      <ul class="auth-points">
-        <li>Автосверка каталога между площадками</li>
-        <li>Кросс-снятие проданных книг</li>
-        <li>Аналитика и журнал операций</li>
-      </ul>
+  <div class="auth-card">
+    <a href="/" class="auth-brand">📚 <span>Букинист</span></a>
+    <div class="auth-head">
+      <h1>Регистрация</h1>
+      <p>Заведите учётную запись. Доступ откроется после того, как владелец выдаст вам роль.</p>
     </div>
-    <div class="auth-aside-foot">© Букинист</div>
-  </aside>
 
-  <div class="auth-main">
-    <div class="auth-card">
-      <a href="/" class="auth-brand">📚 <span>Букинист</span></a>
-      <div class="auth-head">
-        <h1>Регистрация</h1>
-        <p>Заведите учётную запись. Доступ откроется после того, как владелец выдаст вам роль.</p>
-      </div>
+    {% if error %}
+    <div class="notice err"><span>{{ error }}</span></div>
+    {% endif %}
 
-      {% if error %}
-      <div class="notice err"><span>{{ error }}</span></div>
-      {% endif %}
+    <form method="post" action="/register" class="auth-form">
+      <label class="field">
+        <span class="field-label">Телефон</span>
+        <input type="tel" name="phone" required autofocus
+               placeholder="+7 (999) 123-45-67" autocomplete="tel">
+      </label>
 
-      <form method="post" action="/register" class="auth-form">
-        <label class="field">
-          <span class="field-label">Телефон</span>
-          <input type="tel" name="phone" required autofocus
-                 placeholder="+7 (999) 123-45-67" autocomplete="tel">
-        </label>
+      <label class="field">
+        <span class="field-label">ФИО</span>
+        <input type="text" name="full_name" required
+               placeholder="Иванов Иван Иванович" autocomplete="name">
+      </label>
 
-        <label class="field">
-          <span class="field-label">ФИО</span>
-          <input type="text" name="full_name" required
-                 placeholder="Иванов Иван Иванович" autocomplete="name">
-        </label>
+      <label class="field">
+        <span class="field-label">Пароль</span>
+        <input type="password" name="password" required minlength="6"
+               placeholder="Не менее 6 символов" autocomplete="new-password">
+        <span class="field-hint">Этим паролем вы будете входить вместе со своим номером.</span>
+      </label>
 
-        <label class="field">
-          <span class="field-label">Пароль</span>
-          <input type="password" name="password" required minlength="6"
-                 placeholder="Не менее 6 символов" autocomplete="new-password">
-          <span class="field-hint">Этим паролем вы будете входить вместе со своим номером.</span>
-        </label>
+      <button type="submit">Зарегистрироваться</button>
+    </form>
 
-        <button type="submit">Зарегистрироваться</button>
-      </form>
-
-      <p class="auth-foot">Уже есть учётная запись? <a href="/login">Войти</a></p>
-    </div>
+    <p class="auth-foot">Уже есть учётная запись? <a href="/login">Войти</a></p>
   </div>
 </div>
 {% endblock %}

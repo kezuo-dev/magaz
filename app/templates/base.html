@@ -26,7 +26,6 @@
         {% if allowed('log') %}<a href="/log" class="{{ 'active' if path.startswith('/log') else '' }}"><span>Журнал</span></a>{% endif %}
         {% if allowed('settings') %}<a href="/settings" class="{{ 'active' if path.startswith('/settings') else '' }}"><span>Настройки</span></a>{% endif %}
       </nav>
-      <div class="side-user"><span>{{ me.full_name or me.phone_pretty }}</span><small>{{ me.role_label }}</small></div>
       <a href="/logout" class="logout"><span>Выход</span></a>
     </aside>
     <main>
