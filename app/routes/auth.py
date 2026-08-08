@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import (
     ASSIGNABLE_ROLES,
+    ROLE_ABILITIES,
     ROLE_DESCRIPTIONS,
     ROLE_LABELS,
     ROLE_ORDER,
@@ -142,11 +143,24 @@ def users_list(request: Request, db: Session = Depends(get_db), notice: str = ""
             }
         )
 
+    # Памятка «кто что может» — все роли, даже если таких людей ещё нет: владелец
+    # смотрит её как раз перед тем, как выдать роль.
+    role_guide = [
+        {
+            "role": role,
+            "label": ROLE_LABELS.get(role, role),
+            "description": ROLE_DESCRIPTIONS.get(role, ""),
+            "abilities": ROLE_ABILITIES.get(role, []),
+        }
+        for role in ROLE_ORDER
+    ]
+
     return templates.TemplateResponse(
         request,
         "users.html",
         {
             "groups": groups,
+            "role_guide": role_guide,
             "total": len(users),
             "role_labels": ROLE_LABELS,
             "role_descriptions": ROLE_DESCRIPTIONS,

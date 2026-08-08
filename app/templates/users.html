@@ -33,6 +33,29 @@
   </ol>
 </div>
 
+{# Памятка «кто что может» — читается перед выдачей роли. Роли идут от высшей
+   к низшей, тем же порядком, что и группы пользователей ниже. #}
+<div class="users-head">
+  <h2 class="section-h">Что может каждая роль</h2>
+</div>
+
+<div class="role-guide">
+  {% for item in role_guide %}
+  <article class="role-guide-card role-{{ item.role }}">
+    <header>
+      <span class="role-dot"></span>
+      <h3>{{ item.label }}</h3>
+    </header>
+    <p class="role-guide-sub muted">{{ item.description }}</p>
+    <ul class="role-guide-list">
+      {% for ability in item.abilities %}
+      <li>{{ ability }}</li>
+      {% endfor %}
+    </ul>
+  </article>
+  {% endfor %}
+</div>
+
 <div class="users-head">
   <h2 class="section-h">Пользователи</h2>
   <span class="users-total">{{ total }}</span>
@@ -110,6 +133,49 @@
   font-size: 12.5px; font-weight: 700; color: var(--ink-soft);
   background: var(--surface-2); border: 1px solid var(--line);
   border-radius: 999px; padding: 2px 10px;
+}
+
+/* Памятка «кто что может»: карточка на каждую роль, цвет полосы = уровень. */
+.role-guide {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 14px;
+  margin-bottom: 30px;
+}
+.role-guide-card {
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--tier, var(--muted));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.role-guide-card header { display: flex; align-items: center; gap: 8px; }
+.role-guide-card h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.role-guide-sub { margin: 6px 0 0; font-size: 12.5px; line-height: 1.45; }
+.role-guide-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 7px;
+}
+.role-guide-list li {
+  position: relative;
+  padding-left: 17px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.role-guide-list li::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--tier, var(--muted));
 }
 
 /* Группы ролей — от высшей к низшей. Цвет полосы задаёт уровень. */
