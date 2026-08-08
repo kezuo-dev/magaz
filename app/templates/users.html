@@ -19,21 +19,69 @@
 
 <div class="form-import">
   <h2>Заявки из Google-формы</h2>
-  <p class="muted">
-    Люди заполняют форму, программа каждые 5 минут скачивает ответы и заводит заявки.
-    Пароль сразу хешируется — в открытом виде нигде не сохраняется. Чтобы это работало,
-    откройте таблицу ответов формы → Файл → Поделиться → Опубликовать в интернете →
-    выберите лист ответов и формат CSV → вставьте полученную ссылку сюда.
+  <p class="muted form-import-lead">
+    Сотрудник заполняет вашу Google-форму (ФИО, должность, телефон, пароль), а программа
+    сама подтягивает ответы и заводит из них заявки. Пароль сразу превращается в хеш —
+    в открытом виде он нигде не хранится. Ниже — что настроить один раз и как загружать новых людей.
   </p>
+
+  <ol class="guide">
+    <li>
+      <b>Один раз: опубликуйте ответы формы как таблицу CSV.</b>
+      Откройте таблицу с ответами (кнопка «Посмотреть ответы в Таблицах» в редакторе формы).
+      В таблице: <b>Файл → Поделиться → Опубликовать в интернете</b>. В левом списке выберите
+      <b>лист с ответами</b> (обычно «Ответы на форму (1)»), в правом — формат <b>CSV</b>.
+      Нажмите <b>Опубликовать</b> и скопируйте появившуюся ссылку.
+    </li>
+    <li>
+      <b>Один раз: вставьте ссылку сюда.</b>
+      Вставьте скопированную ссылку в поле ниже и нажмите <b>«Сохранить ссылку»</b>.
+      Программа запомнит её и будет ходить по ней автоматически.
+    </li>
+    <li>
+      <b>Дальше всё само.</b>
+      Каждые 5 минут программа сама скачивает новые ответы и добавляет их в список заявок ниже.
+      Отдельно ничего нажимать не нужно — новый сотрудник появится здесь в течение пяти минут
+      после заполнения формы.
+    </li>
+    <li>
+      <b>Нужно прямо сейчас — нажмите «Загрузить заявки сейчас».</b>
+      Кнопка подтягивает ответы немедленно, не дожидаясь автоматической проверки. Повторные
+      нажатия безопасны: уже загруженные люди не задваиваются (сверяем по телефону).
+    </li>
+    <li>
+      <b>Выдайте роль.</b>
+      Новый человек приходит со статусом «Заявка» и войти пока не может. В его карточке ниже
+      выберите роль (Наблюдатель, Менеджер или Администратор) — сразу после этого он сможет
+      войти по своему телефону и паролю.
+    </li>
+  </ol>
+
+  <div class="guide-note muted">
+    Ссылка должна быть именно <b>опубликованной</b> (public CSV). Приватную таблицу программа
+    прочитать не сможет — для неё нужны ключи Google API, это сложнее. Если форма для своих,
+    публичного CSV достаточно.
+  </div>
+
   <form method="post" action="/settings/users/form-url" class="form-url-row">
-    <input type="url" name="csv_url" placeholder="Ссылка на CSV с ответами формы"
-           value="{{ form_csv_url or '' }}">
+    <label class="field">
+      <span class="field-label">Ссылка на опубликованный CSV с ответами формы</span>
+      <input type="url" name="csv_url" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv"
+             value="{{ form_csv_url or '' }}">
+    </label>
     <button type="submit">Сохранить ссылку</button>
   </form>
-  <form method="post" action="/settings/users/import" class="form-import-run">
-    <button type="submit" {{ 'disabled' if not form_csv_url else '' }}>Загрузить заявки вручную</button>
-    {% if not form_csv_url %}<span class="muted">Сначала сохраните ссылку</span>{% endif %}
-  </form>
+
+  <div class="form-import-actions">
+    <form method="post" action="/settings/users/import">
+      <button type="submit" class="secondary" {{ 'disabled' if not form_csv_url else '' }}>Загрузить заявки сейчас</button>
+    </form>
+    {% if form_csv_url %}
+      <span class="status-dot on"><i></i>Ссылка сохранена, автозагрузка каждые 5 минут</span>
+    {% else %}
+      <span class="muted">Сначала сохраните ссылку выше</span>
+    {% endif %}
+  </div>
 </div>
 
 <h2 class="section-h">Все пользователи</h2>
@@ -80,23 +128,56 @@
   margin: 0 0 8px;
   font-size: 18px;
 }
-.form-import .muted {
+.form-import-lead {
   font-size: 14px;
+  line-height: 1.55;
+  margin: 0 0 16px;
+}
+.guide {
+  margin: 0 0 16px;
+  padding-left: 22px;
+  display: grid;
+  gap: 10px;
+}
+.guide li {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+.guide li b {
+  color: var(--ink);
+}
+.guide-note {
+  font-size: 13px;
   line-height: 1.5;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  margin-bottom: 20px;
 }
 .form-url-row {
   display: flex;
   gap: 12px;
-  margin-top: 16px;
+  align-items: flex-end;
+  margin-top: 4px;
+}
+.form-url-row .field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
 }
 .form-url-row input {
-  flex: 1;
+  width: 100%;
 }
-.form-import-run {
+.form-import-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 14px;
+  margin-top: 14px;
+  flex-wrap: wrap;
 }
 .users-list {
   display: grid;

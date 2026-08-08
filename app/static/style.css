@@ -400,28 +400,34 @@ th.col-price { text-align: right; }
 
 /* ---------- Tabs ---------- */
 .settings-tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 2px solid var(--line);
+  display: inline-flex;
+  gap: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 3px;
   margin-bottom: 24px;
 }
 .settings-tabs .tab {
-  padding: 10px 18px;
+  padding: 8px 20px;
   font-size: 14px;
   font-weight: 500;
   color: var(--ink-soft);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  transition: color .15s ease, border-color .15s ease;
+  border-radius: calc(var(--radius-sm) - 2px);
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+  border: 1px solid transparent;
 }
 .settings-tabs .tab:hover {
-  color: var(--accent);
+  color: var(--ink);
+  background: rgba(255,255,255,.5);
   text-decoration: none;
 }
 .settings-tabs .tab.active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  background: var(--surface);
+  border-color: var(--line-strong);
   font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
