@@ -538,6 +538,17 @@ th.col-price { text-align: right; }
 .kill-switch-form .switch::after { width: 26px; height: 26px; }
 .kill-switch-form .switch-input:checked + .switch { background: var(--ok); }
 .kill-switch-form .switch-input:checked + .switch::after { transform: translateX(26px); }
+
+/* Временная панель служебных операций (миграции, разовые исправления). */
+.maintenance-panel {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 16px 20px; border-radius: var(--radius); margin-bottom: 24px;
+  border: 1px solid var(--line); background: var(--surface-2);
+}
+.maintenance-title { font-size: 15px; font-weight: 600; }
+.maintenance-text p { margin: 6px 0 0; font-size: 14px; max-width: 640px; }
+.maintenance-form { flex-shrink: 0; }
+
 .section-h { margin: 8px 0 16px; font-size: 15px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
 
 /* ---------- Tabs ---------- */

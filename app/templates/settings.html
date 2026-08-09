@@ -75,6 +75,20 @@
   </form>
 </div>
 
+<div class="maintenance-panel">
+  <div class="maintenance-text">
+    <div class="maintenance-title">Исправить идентификаторы WB</div>
+    <p class="muted">
+      Разовая миграция: обновляет external_id у всех WB-лотов на актуальный nmID.
+      Нужно запустить один раз, если очистка корзины WB показывает «нет nmID для удаления».
+      После запуска система автоматически обновляет nmID при каждой синхронизации.
+    </p>
+  </div>
+  <form method="post" action="/import/fix-wb-ids" class="maintenance-form">
+    <button type="submit" class="secondary">Обновить nmID</button>
+  </form>
+</div>
+
 <h2 class="section-h">Площадки</h2>
 
 <div class="mp-settings">
