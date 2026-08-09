@@ -43,6 +43,12 @@ def _check_rate_limit(ip: str, phone: str) -> bool:
     """Проверить, не превышен ли лимит попыток входа. True = разрешено, False = заблокировано."""
     now = time.time()
     key = (ip, phone)
+
+    # Периодически чистим старые записи (примерно раз в 100 проверок)
+    import random
+    if random.randint(1, 100) == 1:
+        _cleanup_expired_attempts()
+
     attempts, first_attempt = _login_attempts[key]
 
     # Если окно истекло — сбрасываем счётчик
@@ -57,6 +63,14 @@ def _check_rate_limit(ip: str, phone: str) -> bool:
     # Увеличиваем счётчик
     _login_attempts[key] = (attempts + 1, first_attempt)
     return True
+
+
+def _cleanup_expired_attempts():
+    """Удалить из словаря записи старше окна блокировки, чтобы не копить мусор."""
+    now = time.time()
+    expired = [k for k, (_, first) in _login_attempts.items() if now - first > LOGIN_WINDOW_SECONDS]
+    for k in expired:
+        del _login_attempts[k]
 
 
 def _reset_rate_limit(ip: str, phone: str):
