@@ -9,6 +9,7 @@
 import csv
 import io
 import secrets
+import threading
 import time
 from urllib.parse import quote
 
@@ -86,16 +87,19 @@ def _guess_marketplace(columns: list[str], filename: str) -> str | None:
 
 # Простое хранилище загруженного файла между шагом 1 и шагом 2 (по сессии).
 # Ключ — случайный токен (secrets.token_urlsafe), чтобы избежать коллизий между
-# пользователями и предотвратить утечку данных. Записи старше 1 часа автоудаляются.
+# пользователями и предотвратить утечку данных. Записи старше 10 минут автоудаляются.
+# Блокировка защищает от race condition при параллельных загрузках.
 _uploads: dict[str, tuple[list[dict], float]] = {}  # {token: (rows, timestamp)}
+_uploads_lock = threading.Lock()
 
 
 def _cleanup_old_uploads():
-    """Удалить загрузки старше 1 часа, чтобы избежать утечки памяти."""
+    """Удалить загрузки старше 10 минут, чтобы избежать утечки памяти."""
     now = time.time()
-    expired = [token for token, (_, ts) in _uploads.items() if now - ts > 3600]
-    for token in expired:
-        _uploads.pop(token, None)
+    with _uploads_lock:
+        expired = [token for token, (_, ts) in _uploads.items() if now - ts > 600]
+        for token in expired:
+            _uploads.pop(token, None)
 
 
 def _parse_file(filename: str, raw: bytes) -> list[dict]:
@@ -250,6 +254,17 @@ async def import_upload(
     Если удалось распознать SKU/название — импортируем сразу, без лишних шагов.
     Показываем экран сопоставления только когда автоопределение не справилось.
     """
+    # Проверяем размер ДО чтения в память: защита от DoS через огромные файлы
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_UPLOAD_BYTES:
+        return templates.TemplateResponse(
+            request,
+            "import_start.html",
+            {"marketplaces": list(Marketplace), "sources": _sources(db),
+             "error": f"Файл слишком большой (максимум {MAX_UPLOAD_BYTES // 1024 // 1024} МБ)"},
+            status_code=413,
+        )
+
     raw = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(raw) > MAX_UPLOAD_BYTES:
         return templates.TemplateResponse(
@@ -265,7 +280,7 @@ async def import_upload(
         return templates.TemplateResponse(
             request,
             "import_start.html",
-            {"marketplaces": list(Marketplace), "error": str(exc)},
+            {"marketplaces": list(Marketplace), "sources": _sources(db), "error": str(exc)},
             status_code=400,
         )
 
@@ -273,7 +288,8 @@ async def import_upload(
         return templates.TemplateResponse(
             request,
             "import_start.html",
-            {"marketplaces": list(Marketplace), "error": "Файл пустой"},
+            {"marketplaces": list(Marketplace), "sources": _sources(db),
+             "error": "Файл пустой"},
             status_code=400,
         )
 
@@ -288,7 +304,8 @@ async def import_upload(
     # чтобы брошенные (не доведённые до шага 2) выгрузки не висели в памяти.
     _cleanup_old_uploads()
     token = secrets.token_urlsafe(16)
-    _uploads[token] = (rows, time.time())
+    with _uploads_lock:
+        _uploads[token] = (rows, time.time())
     request.session["import_token"] = token
     request.session["import_marketplace"] = marketplace
 
@@ -296,7 +313,8 @@ async def import_upload(
     auto = _auto_map(columns)
     if auto.get("sku") or auto.get("title"):
         result = _do_import(db, marketplace, rows, auto)
-        _uploads.pop(token, None)
+        with _uploads_lock:
+            _uploads.pop(token, None)
         return templates.TemplateResponse(
             request,
             "import_done.html",
@@ -325,8 +343,9 @@ async def import_run(request: Request, db: Session = Depends(get_db)):
     marketplace = request.session.get("import_marketplace")
     # В _uploads лежит кортеж (строки, время загрузки) — распаковываем, иначе в
     # импорт ушёл бы сам кортеж. Пустой токен или истёкшая запись → на шаг 1.
-    entry = _uploads.get(token) if token else None
-    rows = entry[0] if entry else None
+    with _uploads_lock:
+        entry = _uploads.get(token) if token else None
+        rows = entry[0] if entry else None
     if not rows or not marketplace:
         return RedirectResponse("/import", status_code=303)
 
@@ -338,7 +357,8 @@ async def import_run(request: Request, db: Session = Depends(get_db)):
     }
 
     result = _do_import(db, marketplace, rows, mapping)
-    _uploads.pop(token, None)
+    with _uploads_lock:
+        _uploads.pop(token, None)
     return templates.TemplateResponse(
         request,
         "import_done.html",

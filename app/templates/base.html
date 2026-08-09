@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Букинист{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css?v=19">
+  <link rel="stylesheet" href="/static/style.css?v=20">
 </head>
 <body>
   {# Вошедший пользователь. Вход один — по телефону, поэтому me есть всегда,
@@ -25,15 +25,24 @@
         {% if allowed('imports') %}<a href="/import" class="{{ 'active' if path.startswith('/import') else '' }}"><span>Обновление каталога</span></a>{% endif %}
         {% if allowed('log') %}<a href="/log" class="{{ 'active' if path.startswith('/log') else '' }}"><span>Журнал</span></a>{% endif %}
         {% if allowed('settings') %}<a href="/settings" class="{{ 'active' if path.startswith('/settings') else '' }}"><span>Настройки</span></a>{% endif %}
+        {# Профиль без can(): свой пароль меняет каждый, включая роли без разделов. #}
+        <a href="/account" class="{{ 'active' if path.startswith('/account') else '' }}"><span>Мой профиль</span></a>
       </nav>
-      <a href="/logout" class="logout"><span>Выход</span></a>
+      {# Выход — POST-формой: по GET-ссылке чужой сайт мог выкинуть человека из
+         программы простой картинкой <img src="/logout">. #}
+      <form method="post" action="/logout" class="logout-form">
+        <button type="submit" class="logout"><span>Выход</span></button>
+      </form>
     </aside>
     <main>
       {% block content %}{% endblock %}
     </main>
   </div>
   {% else %}
-  <main>
+  {# main-plain: страницы входа/регистрации центрируют себя сами (.auth-wrap с
+     min-height:100vh). Обычные отступы main давали 100vh+56px и лишнюю
+     вертикальную прокрутку на пустой странице входа. #}
+  <main class="main-plain">
     {{ self.content() }}
   </main>
   {% endif %}

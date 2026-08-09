@@ -27,14 +27,14 @@ import app.marketplaces.ozon as ozon
 import app.marketplaces.wildberries as wb
 
 
-from app.config import settings
+from app.models import UserRole
+from test_helpers import login
 
-# Пароли берём из настроек установки (.env), а не зашитые: у каждой установки свои.
-ADMIN_PW = settings.admin_password
-APP_PW = settings.app_password
-
+# Вход теперь по телефону и паролю, отдельного пароля на разделы нет: что открыто,
+# решает роль (см. app/models.py ROLE_SECTIONS / ROLE_ACTIONS). Основной клиент —
+# владелец, ему открыто всё.
 c = TestClient(app)
-c.post("/login", data={"password": APP_PW})
+login(c, UserRole.ADMIN)
 
 
 def set_auto_withdraw(on: bool):
@@ -45,13 +45,33 @@ def set_auto_withdraw(on: bool):
         s.commit()
 
 
+def set_sync_enabled(on: bool):
+    """Переключить ГЛАВНЫЙ рубильник синхронизации (app/flags.py).
+
+    Рубильников два, и они разные: главный решает, трогаем ли мы площадки вообще
+    (при выключенном продажа только записывается в БД), а «Автоснятие» — снимать
+    ли книгу с ОСТАЛЬНЫХ площадок. Оба по умолчанию ВЫКЛ, поэтому проверки ниже
+    включают их явно, иначе ни одна продажа не проведётся.
+    """
+    from app.flags import set_sync_enabled as _set
+    with SessionLocal() as s:
+        _set(s, on)
+        s.commit()
+
+
 # Большинство проверок рассчитывают на кросс-снятие — включаем боевой режим.
+set_sync_enabled(True)
 set_auto_withdraw(True)
 
 
 def unlock(section="/settings"):
-    """Разблокировать защищённый раздел прямо перед обращением к нему (разово)."""
-    c.post("/admin-login", data={"password": ADMIN_PW, "next": section}, follow_redirects=False)
+    """Оставлено как no-op: отдельного пароля на разделы больше нет.
+
+    Раньше защищённые разделы открывались вводом пароля в /admin-login. Теперь
+    доступ определяется ролью, и основной клиент вошёл владельцем. Функцию не
+    удаляем, чтобы не переписывать десяток мест ниже, — она просто ничего не делает.
+    """
+    return None
 
 
 # --- Заглушки API площадок -------------------------------------------------
@@ -75,6 +95,7 @@ _fake_ozon_info = {"items": []}                  # /v3/product/info/list
 _fake_ozon_stocks = {"items": []}                # /v4/product/info/stocks
 _fake_wb_cards = []                              # карточки WB
 _fake_wb_stocks = []                            # остатки FBS WB: [{"sku","amount"}]
+_ozon_unarchived = []                           # product_id, разархивированные при отмене
 
 # ozon.httpx и wb.httpx — один и тот же модуль. Подменяем post/request общими
 # диспетчерами, маршрутизирующими по URL.
@@ -91,11 +112,24 @@ def fake_post(url, json=None, data=None, headers=None, timeout=None):
         return FakeResponse(200, {"result": [{"updated": True}]})
     if url.endswith("/v3/posting/fbs/list"):
         return FakeResponse(200, {"result": _fake_orders})
+    if url.endswith("/v1/product/archive"):
+        return FakeResponse(200, {"result": True})
+    if url.endswith("/v1/product/unarchive"):
+        # Разархивация при восстановлении после отмены заказа.
+        for pid in (json or {}).get("product_id") or []:
+            _ozon_unarchived.append(pid)
+        return FakeResponse(200, {"result": True})
     raise AssertionError(f"неожиданный POST: {url}")
 
 
 # Сюда пишем, что WB отправил на запись остатка (PUT) — для проверки снятия.
 _wb_stock_writes = []
+
+# Отменённые заказы WB (/api/v3/orders/cancel) и следы удаления/восстановления
+# карточек в корзине WB — для проверки очистки корзины и обработки отмен.
+_fake_wb_cancelled = {"orders": []}
+_wb_trash_deletes = []
+_wb_trash_recovers = []
 
 
 def fake_request(method, url, json=None, data=None, params=None, headers=None, timeout=None):
@@ -113,6 +147,19 @@ def fake_request(method, url, json=None, data=None, params=None, headers=None, t
         return FakeResponse(200, {})
     if url.endswith("/api/v3/orders/new"):
         return FakeResponse(200, _fake_wb_orders)
+    if url.endswith("/api/v3/orders/cancel"):
+        return FakeResponse(200, _fake_wb_cancelled)
+    if url.endswith("/content/v2/cards/delete/trash"):
+        # Удаление карточек в корзину WB. Запоминаем nmID, чтобы проверить,
+        # какие книги реально ушли в корзину.
+        for nm in (json or {}).get("nmIDs") or []:
+            _wb_trash_deletes.append(nm)
+        return FakeResponse(200, {})
+    if url.endswith("/content/v2/cards/recover"):
+        # Восстановление карточек из корзины WB (при отмене заказа).
+        for nm in (json or {}).get("nmIDs") or []:
+            _wb_trash_recovers.append(nm)
+        return FakeResponse(200, {})
     raise AssertionError(f"неожиданный запрос: {method} {url}")
 
 
@@ -180,21 +227,35 @@ def set_enabled(marketplace, value):
 
 unlock("/settings")
 r = c.get("/settings")
-assert r.status_code == 200 and "Настройки площадок" in r.text, "нет страницы настроек"
+assert r.status_code == 200 and "<h1>Настройки</h1>" in r.text, "нет страницы настроек"
 r = c.get("/")
 assert 'href="/settings"' in r.text and 'href="/log"' in r.text, "нет ссылок в меню"
 # Меню больше не содержит выставления/добавления книг.
 assert 'href="/books/new"' not in r.text, "осталась кнопка «Добавить книгу»"
 print("[ok] разделы в меню; кнопки добавления книги нет")
 
+# Настройки закрыты не паролем, а ролью: менеджер их не видит, журнал — видит.
 c2 = TestClient(app)
-c2.post("/login", data={"password": APP_PW})
+login(c2, UserRole.MANAGER)
 r = c2.get("/settings", follow_redirects=False)
-assert r.status_code == 303 and "/admin-login" in r.headers["location"], "Настройки открылись без пароля!"
-# Журнал открыт всем вошедшим — там только записи синхронизации, не секреты.
+assert r.status_code == 403, f"Настройки открылись менеджеру: {r.status_code}"
 r = c2.get("/log", follow_redirects=False)
-assert r.status_code == 200, "Журнал должен быть доступен без отдельного пароля"
-print("[ok] Настройки под паролем, Журнал открыт вошедшим")
+assert r.status_code == 200, "Журнал должен быть доступен менеджеру"
+print("[ok] Настройки закрыты по роли, Журнал открыт вошедшим")
+
+# Действия внутри каталога тоже по роли: смотреть можно, менять — нет.
+c3 = TestClient(app)
+login(c3, UserRole.VIEWER)
+assert c3.get("/").status_code == 200, "каталог должен быть открыт сотруднику"
+for path in ("/catalog/reconcile", "/catalog/wb_trash", "/catalog/wipe"):
+    r = c3.post(path, data={"password": "2601", "days": "7"}, follow_redirects=False)
+    assert r.status_code == 403, f"{path} открыт сотруднику: {r.status_code}"
+# Менеджеру сверка разрешена, а удаление карточек и очистка — нет.
+r = c2.post("/catalog/wb_trash", data={"days": "7"}, follow_redirects=False)
+assert r.status_code == 403, "корзина WB открыта менеджеру"
+r = c2.post("/catalog/wipe", data={"password": "2601"}, follow_redirects=False)
+assert r.status_code == 403, "очистка каталога открыта менеджеру"
+print("[ok] действия каталога закрыты по роли (сотрудник/менеджер)")
 
 
 # --- 2. Только две площадки: Ozon и WB, Avito нет --------------------------

@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.access import require_action
 from app.config import settings
 from app.db import get_db
 from app.forbidden_check import check_catalog_for_forbidden
@@ -177,14 +178,21 @@ def index(
     stmt = _filtered_books_query(q, status, marketplace)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
-    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    # Зажимаем номер страницы в допустимый диапазон: ввод вручную может быть любым.
-    page = min(max(1, page), pages)
-    books = db.scalars(
-        _sorted_books_query(stmt)
-        .offset((page - 1) * PAGE_SIZE)
-        .limit(PAGE_SIZE)
-    ).all()
+
+    # Обработка пустого каталога: не показываем "Страница 1 из 1"
+    if total == 0:
+        pages = 0
+        page = 0
+        books = []
+    else:
+        pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        # Зажимаем номер страницы в допустимый диапазон: ввод вручную может быть любым.
+        page = min(max(1, page), pages)
+        books = db.scalars(
+            _sorted_books_query(stmt)
+            .offset((page - 1) * PAGE_SIZE)
+            .limit(PAGE_SIZE)
+        ).all()
 
     return templates.TemplateResponse(
         request,
@@ -263,7 +271,7 @@ def view_book(book_id: int, request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "book_detail.html", {"book": book})
 
 
-@router.post("/catalog/wipe")
+@router.post("/catalog/wipe", dependencies=[Depends(require_action("catalog_wipe"))])
 def wipe_catalog(
     request: Request,
     db: Session = Depends(get_db),
@@ -370,7 +378,7 @@ def download_forbidden_pdf(db: Session = Depends(get_db)):
     )
 
 
-@router.post("/catalog/reconcile")
+@router.post("/catalog/reconcile", dependencies=[Depends(require_action("catalog_sync"))])
 def reconcile_withdrawn(db: Session = Depends(get_db)):
     """Кнопка «Проверить снятые»: принудительная сверка снятых/проданных книг.
 
@@ -402,7 +410,7 @@ def reconcile_withdrawn(db: Session = Depends(get_db)):
     return RedirectResponse("/?synced=" + quote(message), status_code=303)
 
 
-@router.post("/catalog/wb_trash")
+@router.post("/catalog/wb_trash", dependencies=[Depends(require_action("catalog_trash"))])
 def wb_trash(db: Session = Depends(get_db), days: int = Form(7)):
     """Кнопка «Очистить корзину WB»: удалить снятые книги в корзину Wildberries.
 

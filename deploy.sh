@@ -59,9 +59,12 @@ DEFAULT_LENGTH_MM=220
 DEFAULT_WIDTH_MM=150
 DEFAULT_HEIGHT_MM=30
 
-# --- Пароли входа (запишите их себе) ---
-APP_PASSWORD=$(openssl rand -hex 4)
-ADMIN_PASSWORD=$(openssl rand -hex 4)
+# --- Вход (запишите пароли себе) ---
+# Владелец — единственная роль «Владелец», её создаёт первый запуск программы.
+# Номер задайте свой: по нему вы будете входить. Пароль сгенерирован случайно,
+# сменить его можно потом в разделе «Мой профиль».
+OWNER_PHONE=${OWNER_PHONE:-+79990000000}
+OWNER_PASSWORD=$(openssl rand -hex 6)
 WIPE_PASSWORD=$(openssl rand -hex 4)
 EOF
 else
@@ -77,7 +80,7 @@ docker compose --env-file .env.prod up -d --build
 
 echo
 echo "Готово. Адрес: https://${DOMAIN_ARG:-$(grep '^DOMAIN=' .env.prod | cut -d= -f2)}"
-echo "Пароли входа:"
-grep -E '^(APP|ADMIN|WIPE)_PASSWORD=' .env.prod | sed 's/^/  /'
+echo "Вход владельца (смените пароль в разделе «Мой профиль»):"
+grep -E '^(OWNER_PHONE|OWNER_PASSWORD|WIPE_PASSWORD)=' .env.prod | sed 's/^/  /'
 echo
 echo "Логи:  docker compose --env-file .env.prod logs -f app"

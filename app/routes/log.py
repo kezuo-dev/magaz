@@ -101,11 +101,14 @@ def log_by_book(
     stmt = select(SyncLog).where(SyncLog.book_id.is_not(None))
 
     if q:
-        # Поиск по артикулу — джойним Book
+        # Поиск по артикулу — используем LEFT JOIN, чтобы не терять записи удалённых книг
         needle = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like = f"%{needle}%"
-        stmt = stmt.join(Book, Book.id == SyncLog.book_id).where(
-            Book.sku.ilike(like, escape="\\")
+        stmt = stmt.join(Book, Book.id == SyncLog.book_id, isouter=True).where(
+            or_(
+                Book.sku.ilike(like, escape="\\"),
+                SyncLog.message.ilike(like, escape="\\")  # запасной вариант: ищем в сообщении
+            )
         )
     if marketplace:
         stmt = stmt.where(SyncLog.marketplace == marketplace)

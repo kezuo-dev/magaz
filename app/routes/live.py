@@ -4,9 +4,11 @@
 чтобы страницы оставались обычными server-rendered, а живость была надстройкой:
 если JS отключён или эндпоинт упал — страница работает как раньше.
 
-Каталог и журнал открыты всем вошедшим (как и их HTML-страницы). Аналитика —
-только после ввода пароля раздела (флаг в сессии), иначе цифры утекали бы через
-JSON в обход формы.
+Каталог, журнал и аналитика открыты всем вошедшим — ровно как их HTML-страницы.
+Отдельного пароля на аналитике больше нет, поэтому и здесь его не проверяем.
+
+Проверка авторизации: middleware require_login проверяет request.state.user,
+поэтому явный Request в параметрах обязателен — иначе незалогиненные пройдут.
 """
 from __future__ import annotations
 
@@ -27,17 +29,24 @@ LOG_BURST = 40
 
 
 @router.get("/catalog")
-def live_catalog(db: Session = Depends(get_db)):
+def live_catalog(request: Request, db: Session = Depends(get_db)):
     """Счётчики каталога + отпечаток состояния для подсветки изменений."""
     in_stock = db.scalar(
         select(func.count(Book.id)).where(Book.status == BookStatus.IN_STOCK)
     ) or 0
 
+    # Условие должно совпадать с _catalog_stats() в routes/catalog.py: активный лот И
+    # книга в продаже. Без join по Book живые числа выходили больше отрисованных,
+    # и через пару секунд после загрузки счётчики сами подскакивали.
     def _on_marketplace(mp: str) -> int:
         return db.scalar(
-            select(func.count(func.distinct(Listing.book_id))).where(
+            select(func.count(func.distinct(Listing.book_id)))
+            .select_from(Listing)
+            .join(Book, Book.id == Listing.book_id)
+            .where(
                 Listing.marketplace == mp,
                 Listing.status == ListingStatus.ACTIVE,
+                Book.status == BookStatus.IN_STOCK,
             )
         ) or 0
 
@@ -49,7 +58,7 @@ def live_catalog(db: Session = Depends(get_db)):
     return JSONResponse({
         "in_stock": in_stock,
         "on_ozon": _on_marketplace(Marketplace.OZON.value),
-        "on_wb": _on_marketplace(Marketplace.WILDBERRIES.value),
+        "on_wb": _on_marketplace(Marketplace.WB.value),
         "total": total_books,
         "sold": sold,
     })
@@ -57,6 +66,7 @@ def live_catalog(db: Session = Depends(get_db)):
 
 @router.get("/log")
 def live_log(
+    request: Request,
     db: Session = Depends(get_db),
     after_id: int = 0,
     marketplace: str = "",
@@ -114,10 +124,12 @@ def live_log(
 
 @router.get("/analytics")
 def live_analytics(request: Request, db: Session = Depends(get_db)):
-    """Полная статистика аналитики. Требует разблокировки раздела паролем."""
-    if not request.session.get("analytics_unlocked"):
-        return JSONResponse({"error": "locked"}, status_code=403)
+    """Полная статистика аналитики.
 
+    Пароля на разделе больше нет (см. analytics_page), поэтому и здесь его не
+    проверяем: раньше страница открывалась всем, а живое обновление молча падало
+    с 403 — время «обновлено» на ней навсегда застывало.
+    """
     from app.routes.analytics import _build_stats
 
     stats = _build_stats(db)

@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
+{# Своя переменная, а не me из base.html: {% set %} в родителе не виден внутри
+   блока дочернего шаблона. Нужна, чтобы не показывать кнопки, которые роли
+   всё равно запрещены — иначе человек жал бы их и получал отказ. #}
+{% set me = request.state.user %}
 <div class="page-head">
   <div>
     <div class="page-eyebrow">Мониторинг площадок</div>
@@ -10,12 +14,12 @@
     </div>
   </div>
   <div class="head-actions">
-    <button type="button" id="sync-btn">Обновить каталог</button>
+    {% if me.can('imports') %}<button type="button" id="sync-btn">Обновить каталог</button>{% endif %}
     <button type="button" id="check-forbidden-btn">Проверить запрещённые темы</button>
-    <button type="button" id="reconcile-btn">Проверить снятые</button>
-    <button type="button" id="wb-trash-btn">Очистить корзину WB</button>
+    {% if me.can_do('catalog_sync') %}<button type="button" id="reconcile-btn">Проверить снятые</button>{% endif %}
+    {% if me.can_do('catalog_trash') %}<button type="button" id="wb-trash-btn">Очистить корзину WB</button>{% endif %}
     <button type="button" class="secondary" id="export-pdf-open">Экспорт PDF</button>
-    <button type="button" class="ghost-danger" id="wipe-open">Очистить</button>
+    {% if me.can_do('catalog_wipe') %}<button type="button" class="ghost-danger" id="wipe-open">Очистить</button>{% endif %}
   </div>
 </div>
 
@@ -190,6 +194,9 @@
 </div>
 
 <!-- Модалка очистки каталога -->
+{# Модалки прячем вместе с кнопками: иначе в разметке осталась бы форма на
+   запрещённый роут, которую видно через «исходный код страницы». #}
+{% if me.can_do('catalog_wipe') %}
 <div class="modal-overlay" id="wipe-modal" hidden>
   <div class="modal modal-danger" role="dialog" aria-modal="true" aria-labelledby="wipe-title">
     <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
@@ -205,8 +212,10 @@
     </form>
   </div>
 </div>
+{% endif %}
 
 <!-- Модалка подтверждения сверки -->
+{% if me.can('imports') %}
 <div class="modal-overlay" id="sync-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sync-title">
     <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
@@ -221,8 +230,10 @@
     </form>
   </div>
 </div>
+{% endif %}
 
 <!-- Модалка подтверждения проверки снятых -->
+{% if me.can_do('catalog_sync') %}
 <div class="modal-overlay" id="reconcile-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reconcile-title">
     <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
@@ -237,8 +248,10 @@
     </form>
   </div>
 </div>
+{% endif %}
 
 <!-- Модалка подтверждения очистки корзины WB -->
+{% if me.can_do('catalog_trash') %}
 <div class="modal-overlay" id="wb-trash-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wb-trash-title">
     <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
@@ -264,6 +277,7 @@
     </form>
   </div>
 </div>
+{% endif %}
 
 <script>
   // ---- Закрытие уведомлений крестиком (с плавным исчезновением) ----
@@ -285,8 +299,17 @@
     m.classList.remove("show");
     setTimeout(() => { m.hidden = true; }, 220);
   }
-  document.getElementById("wipe-open").addEventListener("click", () => openModal("wipe-modal"));
-  document.getElementById("export-pdf-open").addEventListener("click", () => openModal("export-pdf-modal"));
+  // Часть кнопок в шапке скрыта по правам роли. Раньше обработчики вешались
+  // напрямую через getElementById(...).addEventListener — на отсутствующей
+  // кнопке скрипт падал на первой же строке и уносил с собой живой поиск,
+  // пагинацию и автообновление. Поэтому вешаем только если элемент есть.
+  function onClick(id, handler) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("click", handler);
+  }
+
+  onClick("wipe-open", () => openModal("wipe-modal"));
+  onClick("export-pdf-open", () => openModal("export-pdf-modal"));
 
   // ---- Экспорт каталога в PDF ----
   document.getElementById("export-pdf-form").addEventListener("submit", function (e) {
@@ -301,11 +324,11 @@
     window.open("/catalog/export/pdf?" + params.toString(), "_blank");
     closeModal(document.getElementById("export-pdf-modal"));
   });
-  document.getElementById("sync-btn").addEventListener("click", () => openModal("sync-modal"));
-  document.getElementById("check-forbidden-btn").addEventListener("click", () => openModal("check-forbidden-modal"));
-  document.getElementById("check-forbidden-go").addEventListener("click", () => location.href = "/catalog/check_forbidden");
-  document.getElementById("reconcile-btn").addEventListener("click", () => openModal("reconcile-modal"));
-  document.getElementById("wb-trash-btn").addEventListener("click", () => openModal("wb-trash-modal"));
+  onClick("sync-btn", () => openModal("sync-modal"));
+  onClick("check-forbidden-btn", () => openModal("check-forbidden-modal"));
+  onClick("check-forbidden-go", () => location.href = "/catalog/check_forbidden");
+  onClick("reconcile-btn", () => openModal("reconcile-modal"));
+  onClick("wb-trash-btn", () => openModal("wb-trash-modal"));
   document.querySelectorAll(".modal-overlay").forEach(function (ov) {
     ov.addEventListener("click", function (e) {
       if (e.target === ov || e.target.hasAttribute("data-close")) closeModal(ov);
@@ -397,7 +420,7 @@
 
     function renderRows(items) {
       if (!items.length) {
-        body.innerHTML = '<tr class="empty-row"><td colspan="5" class="empty">' +
+        body.innerHTML = '<tr class="empty-row"><td colspan="4" class="empty">' +
           '<div class="empty-box"><div class="empty-icon">🔍</div>' +
           '<div>Ничего не найдено. Измените запрос или фильтр.</div></div></td></tr>';
         return;

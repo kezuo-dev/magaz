@@ -4,11 +4,11 @@ import io
 from starlette.testclient import TestClient
 
 from app.main import app
+from app.models import UserRole
+from test_helpers import TEST_PASSWORD, ensure_user, login
 
-from app.config import settings
-
-# Пароль берём из настроек (.env), а не зашиваем: у каждой установки он свой.
-APP_PW = settings.app_password
+# Вход по телефону и паролю: общего пароля «на склад» больше нет.
+OWNER_PHONE = ensure_user(UserRole.ADMIN)
 
 c = TestClient(app)
 
@@ -17,14 +17,26 @@ r = c.get("/", follow_redirects=False)
 assert r.status_code == 303 and r.headers["location"] == "/login", r.status_code
 print("[ok] неавторизованный редирект на логин")
 
-# 2. Неверный пароль
-r = c.post("/login", data={"password": "wrong"}, follow_redirects=False)
-assert r.status_code == 401, r.status_code
+# 2. Неверный пароль — обратно на форму входа с пометкой об ошибке
+r = c.post(
+    "/login",
+    data={"phone": OWNER_PHONE, "password": "wrong"},
+    follow_redirects=False,
+)
+assert r.status_code == 303 and r.headers["location"] == "/login?error=bad", r.status_code
 print("[ok] неверный пароль отклонён")
 
-# 3. Верный пароль (из настроек текущей установки)
-r = c.post("/login", data={"password": APP_PW}, follow_redirects=False)
-assert r.status_code == 303 and r.headers["location"] == "/", r.status_code
+# 3. Незнакомый телефон отклоняется так же, как неверный пароль (не выдаём, кто есть в базе)
+r = c.post(
+    "/login",
+    data={"phone": "79990000000", "password": TEST_PASSWORD},
+    follow_redirects=False,
+)
+assert r.status_code == 303 and r.headers["location"] == "/login?error=bad", r.status_code
+print("[ok] незнакомый телефон отклонён")
+
+# 4. Верный телефон + пароль
+login(c, UserRole.ADMIN)
 print("[ok] вход выполнен")
 
 # 4. Каталог открывается

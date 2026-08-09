@@ -5,14 +5,15 @@
 """
 from starlette.testclient import TestClient
 
-from app.config import settings
 from app.db import SessionLocal
 from app.main import app
-from app.models import Book, BookStatus
+from app.models import Book, BookStatus, UserRole
+from test_helpers import login
 
 c = TestClient(app)
-# Пароль берём из настроек (.env), а не зашитый: у каждой установки свой.
-c.post("/login", data={"password": settings.app_password})
+# Вход по телефону и паролю. Владельцем: проверки ниже трогают очистку каталога,
+# а она разрешена только владельцу и руководителю (ROLE_ACTIONS).
+login(c, UserRole.ADMIN)
 
 # 1. Активная вкладка: на "/" подсвечен Каталог, на /import — Обновление каталога
 r = c.get("/")

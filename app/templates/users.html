@@ -100,8 +100,10 @@
                 {% endfor %}
               </select>
             </form>
+            {# Имя передаём через data-атрибут, а не внутрь confirm(): апостроф
+               в фамилии (О'Брайен) разрывал JS-строку и ломал подтверждение. #}
             <form method="post" action="/settings/users/{{ user.id }}/delete"
-                  onsubmit="return confirm('Удалить {{ user.full_name or user.phone_pretty }}? Он потеряет доступ к программе.')">
+                  class="user-delete-form" data-name="{{ user.full_name or user.phone_pretty }}">
               <button type="submit" class="ghost-danger">Удалить</button>
             </form>
           {% endif %}
@@ -247,6 +249,18 @@
   document.querySelectorAll(".notice-close").forEach(function (btn) {
     btn.addEventListener("click", function () {
       btn.closest(".notice").remove();
+    });
+  });
+
+  // Подтверждение удаления. Имя берём из data-атрибута: в разметке оно уже
+  // экранировано как HTML, а в JS попадает готовой строкой — апостроф в
+  // фамилии больше ничего не ломает.
+  document.querySelectorAll(".user-delete-form").forEach(function (form) {
+    form.addEventListener("submit", function (event) {
+      var name = form.dataset.name || "этого пользователя";
+      if (!confirm("Удалить " + name + "? Он потеряет доступ к программе.")) {
+        event.preventDefault();
+      }
     });
   });
 </script>

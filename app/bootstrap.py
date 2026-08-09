@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 
 from sqlalchemy import select
 
@@ -19,6 +20,19 @@ from app.models import User, UserRole
 from app.security import hash_password, normalize_phone
 
 logger = logging.getLogger("bootstrap")
+
+
+def _initial_password() -> tuple[str, bool]:
+    """Пароль для новой учётной записи владельца и признак «сгенерирован».
+
+    Пустой OWNER_PASSWORD — обычная ситуация: пароля по умолчанию в коде нет
+    намеренно. Тогда придумываем случайный и возвращаем флаг, чтобы вызывающий
+    напечатал его в лог: иначе в свежую программу нельзя было бы войти вообще.
+    """
+    password = settings.owner_password.strip()
+    if password:
+        return password, False
+    return secrets.token_urlsafe(9), True
 
 
 def ensure_owner() -> None:
@@ -50,17 +64,27 @@ def ensure_owner() -> None:
                 logger.info("Запись %s повышена до владельца", phone)
             return
 
+        password, generated = _initial_password()
         db.add(
             User(
                 phone=phone,
                 full_name=settings.owner_name,
-                password_hash=hash_password(settings.owner_password),
+                password_hash=hash_password(password),
                 role=UserRole.ADMIN,
                 source="owner",
             )
         )
         db.commit()
         logger.info("Создан владелец: %s", phone)
+        if generated:
+            # Печатаем один раз и только для свежесозданной записи: иначе войти
+            # было бы невозможно. Пароль виден в логах (docker compose logs),
+            # поэтому сразу просим его сменить.
+            logger.warning(
+                "OWNER_PASSWORD не задан — сгенерирован временный пароль: %s\n"
+                "Войдите с ним и смените пароль в разделе «Мой профиль».",
+                password,
+            )
     except Exception:  # noqa: BLE001 — сбой сидирования не должен ронять старт
         db.rollback()
         logger.exception("Не удалось создать владельца")

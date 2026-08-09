@@ -1,14 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
+{# Страница на два случая: закрыт РАЗДЕЛ (тогда есть section_title) и запрещено
+   отдельное ДЕЙСТВИЕ внутри открытого раздела (тогда приходит message). Второй
+   случай появился вместе с ROLE_ACTIONS: каталог виден всем, но снимать книги
+   с площадок и стирать базу может не каждый. #}
 <div class="page-head">
   <div>
     <h1>Нет доступа</h1>
-    <p class="page-sub muted">Раздел «{{ section_title }}» закрыт для вашей роли.</p>
+    <p class="page-sub muted">
+      {% if section_title %}Раздел «{{ section_title }}» закрыт для вашей роли.
+      {% else %}Это действие закрыто для вашей роли.{% endif %}
+    </p>
   </div>
 </div>
 
 <div class="notice err" style="margin-top:8px">
-  <span>Ваша роль — «{{ user.role_label }}». Чтобы открыть этот раздел, попросите руководителя изменить права.</span>
+  <span>
+    {% if message %}{{ message }}
+    {% else %}Ваша роль — «{{ user.role_label }}». Чтобы открыть этот раздел, попросите руководителя изменить права.{% endif %}
+  </span>
 </div>
 
 <p style="margin-top:24px"><a href="/">Вернуться в каталог</a></p>

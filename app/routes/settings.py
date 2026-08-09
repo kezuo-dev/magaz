@@ -159,8 +159,10 @@ def check_connection(
             message = "Подключение успешно"
         except MarketplaceError as exc:
             message = str(exc)
-        except Exception as exc:  # noqa: BLE001 — любой сбой показываем как есть
-            message = f"Ошибка проверки: {exc}"
+        except Exception as exc:  # noqa: BLE001 — не роняем страницу, но детали не показываем
+            import logging
+            logging.exception(f"Ошибка проверки подключения {marketplace}")
+            message = "Ошибка проверки (см. журнал)"
 
     db.add(SyncLog(marketplace=marketplace, action="check_connection", ok=ok, message=message))
     db.commit()

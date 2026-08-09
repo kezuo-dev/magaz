@@ -21,9 +21,14 @@ class Settings(BaseSettings):
 
     # Учётная запись владельца. Создаётся один раз при старте (app/bootstrap.py),
     # это единственная роль ADMIN. Если владелец уже есть в базе, эти значения
-    # больше не применяются — сменить пароль можно только в самой программе.
+    # больше не применяются — пароль меняется в Настройках.
+    #
+    # Пароля по умолчанию здесь НЕТ намеренно: любое значение в коде попадает в
+    # git, а телефон владельца известен, поэтому дефолт равнозначен публичному
+    # входу в программу. Если OWNER_PASSWORD не задан, bootstrap придумает
+    # случайный и один раз напечатает его в лог — сменить можно в Настройках.
     owner_phone: str = "+79822798700"
-    owner_password: str = "admin74"
+    owner_password: str = ""
     owner_name: str = "Владелец"
     # Базовый публичный адрес, по которому площадки скачивают фото. Если включён
     # туннель (см. ниже), он перезапишет это значение выданным https-адресом.
@@ -60,14 +65,32 @@ class Settings(BaseSettings):
     default_width_mm: int = 150
     default_height_mm: int = 30
 
+    # Помечать ли куку сессии Secure. Пусто — решаем по public_base_url (https →
+    # да). Отдельный ключ нужен, потому что адрес может стать https уже во время
+    # работы: туннель перезаписывает public_base_url в lifespan, а кука
+    # настраивается один раз при старте. Если включаете туннель и входите по его
+    # https-адресу — поставьте SESSION_HTTPS_ONLY=true, иначе кука уйдёт и по http.
+    session_https_only: bool | None = None
+
 
 settings = Settings()
+
+
+def _resolve_https_only() -> bool:
+    """Помечать ли куку сессии Secure.
+
+    Явное значение из настроек важнее автоопределения: адрес в public_base_url
+    может не совпадать с тем, по которому реально открывают программу.
+    """
+    if settings.session_https_only is not None:
+        return settings.session_https_only
+    return settings.public_base_url.strip().lower().startswith("https://")
 
 
 # На проде адрес публичный (https) — тогда куку сессии помечаем Secure, чтобы она
 # не уходила по незашифрованному соединению. Локально (http) остаётся обычной,
 # иначе вход по http://localhost не работал бы.
-HTTPS_ONLY = settings.public_base_url.strip().lower().startswith("https://")
+HTTPS_ONLY = _resolve_https_only()
 
 # Каталоги данных создаём заранее, чтобы SQLite и фиды не падали на старте.
 DATA_DIR.mkdir(exist_ok=True)

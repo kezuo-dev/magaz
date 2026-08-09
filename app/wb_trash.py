@@ -3,6 +3,9 @@
 Проходит по книгам со статусом SOLD/WITHDRAWN, у которых есть лот WB с
 остатком 0, и удаляет карточки в корзину небольшими пачками с паузами (чтобы не
 схлопнуть лимит API 429). Вызывается по кнопке из UI или по расписанию.
+
+Книги со свежим неотменённым заказом (моложе CANCEL_GRACE_DAYS) не трогаем:
+заказ ещё могут отменить, и тогда карточку пришлось бы достать из корзины.
 """
 from __future__ import annotations
 
@@ -14,6 +17,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.marketplaces import MarketplaceError, get_client
 from app.models import Book, BookStatus, Listing, MarketplaceAccount, Order, SyncLog, utcnow
 from app.security import decrypt_credentials
+
+
+# Сколько дней после заказа не трогаем карточку проданной книги: столько живёт
+# риск отмены. Пока окно не вышло, карточка остаётся в кабинете WB — если заказ
+# отменят, её не придётся достать из корзины.
+CANCEL_GRACE_DAYS = 14
 
 
 def _log(db: Session, *, action, ok, message, book_id=None) -> None:
@@ -74,14 +83,27 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
              message=f"Очистка корзины WB ({period_label}): снятых книг для удаления нет")
         return {"processed": 0, "deleted": 0, "failed": 0}
 
-    # Одним запросом узнаём, у каких книг есть активный (не отменённый) заказ.
-    # Раньше был N+1: отдельный SELECT для каждой книги.
+    # Одним запросом узнаём, у каких книг есть СВЕЖИЙ активный (не отменённый)
+    # заказ. Раньше был N+1: отдельный SELECT для каждой книги.
+    #
+    # Почему именно свежий, а не любой: статус SOLD книге ставится (sync.py,
+    # refresh_book_status) ТОЛЬКО когда у неё есть неотменённый заказ. Поэтому
+    # «пропускать книги с любым активным заказом» отбрасывало все SOLD-книги
+    # без исключения — условия взаимоисключающие, и половина выборки была
+    # мёртвой: в корзину уходили только WITHDRAWN, а карточки проданных книг
+    # оставались в кабинете WB навсегда.
+    #
+    # Смысл пропуска — переждать возможную отмену, а она приходит в первые дни.
+    # Поэтому блокируем удаление только на время окна отмены, дальше карточку
+    # проданной книги можно спокойно убирать.
     book_ids = [b.id for b in books]
+    cancel_grace_cutoff = utcnow() - timedelta(days=CANCEL_GRACE_DAYS)
     active_order_book_ids: set[int] = set(
         db.scalars(
             select(Order.book_id).where(
                 Order.book_id.in_(book_ids),
                 Order.cancelled == False,  # noqa: E712
+                Order.created_at >= cancel_grace_cutoff,
             ).distinct()
         ).all()
     )
@@ -89,7 +111,8 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
     # Собираем nmID карточек для удаления
     to_delete = []
     for book in books:
-        # Пропускаем книги с активным заказом: заказ может быть отменён позже.
+        # Пропускаем книги со свежим заказом: он ещё может быть отменён, и тогда
+        # карточку придётся достать из корзины обратно.
         if book.id in active_order_book_ids:
             continue
 

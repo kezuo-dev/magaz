@@ -44,21 +44,27 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, stored: str) -> bool:
-    """Проверить пароль против хеша из БД. stored — результат hash_password()."""
+    """Проверить пароль против хеша из БД. stored — результат hash_password().
+
+    Использует secrets.compare_digest для защиты от timing attacks.
+    """
     if not stored or "$" not in stored:
         return False
     salt, expected_hash = stored.split("$", 1)
     pwd_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000)
-    return pwd_hash.hex() == expected_hash
+    return secrets.compare_digest(pwd_hash.hex(), expected_hash)
 
 
 def normalize_phone(phone: str) -> str:
-    """Нормализовать телефон: только цифры, 11 знаков, начинается с 7.
+    """Нормализовать телефон: только ASCII-цифры, 11 знаков, начинается с 7.
 
     +7 (999) 123-45-67 → 79991234567
     8 999 123 45 67    → 79991234567
+
+    Явно проверяем ASCII-цифры (0-9), чтобы Unicode-цифры (арабские, бенгальские и т.д.)
+    не проникли в базу и не сломали вход.
     """
-    digits = "".join(c for c in phone if c.isdigit())
+    digits = "".join(c for c in phone if c in "0123456789")
     if digits.startswith("8") and len(digits) == 11:
         digits = "7" + digits[1:]
     return digits

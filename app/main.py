@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exception_handlers import http_exception_handler as starlette_http_exception_handler
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.access import SECTION_TITLES, section_for_path
@@ -76,11 +78,27 @@ async def require_login(request: Request, call_next):
     решает его роль (ROLE_SECTIONS): раздел Настройки открыт владельцу и
     руководителю, остальным — нет.
     """
-    open_paths = ("/login", "/logout", "/register", "/register-done", "/static")
+    # /logout здесь нет намеренно: выход имеет смысл только для вошедшего, а
+    # пускать до него без сессии незачем. Незашедшего и так унесёт на /login.
+    open_paths = ("/login", "/register", "/register-done", "/static")
     path = request.url.path
 
     if path.startswith(open_paths):
         return await call_next(request)
+
+    # Защита от CSRF: проверяем Origin/Referer на POST-запросах
+    if request.method == "POST":
+        origin = request.headers.get("origin") or request.headers.get("referer", "")
+        expected_host = request.headers.get("host", "")
+        # Если есть Origin/Referer — проверяем, что они с нашего домена
+        if origin and expected_host:
+            # origin может быть "https://site.com" или "https://site.com/"
+            # referer может быть "https://site.com/page"
+            origin_clean = origin.rstrip("/").lower()
+            if not (f"://{expected_host}" in origin_clean or origin_clean.endswith(f"://{expected_host}")):
+                # Запрос пришёл со стороннего сайта — CSRF
+                logging.warning(f"CSRF attempt: origin={origin}, host={expected_host}")
+                return RedirectResponse("/login", status_code=303)
 
     user = _load_session_user(request)
     if user is None:
@@ -114,6 +132,27 @@ app.add_middleware(
     https_only=HTTPS_ONLY,
     same_site="lax",
 )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """403 от охранника действий показываем страницей, а не сырым JSON.
+
+    require_action (см. app/access.py) поднимает HTTPException из зависимости
+    роута — по умолчанию FastAPI отдал бы {"detail": "..."}, и человек, нажавший
+    кнопку в интерфейсе, увидел бы техническую строку вместо объяснения.
+    Остальные коды оставляем стандартной обработке.
+    """
+    if exc.status_code == 403:
+        user = getattr(request.state, "user", None)
+        if user is not None:
+            return templates.TemplateResponse(
+                request,
+                "no_access.html",
+                {"section_title": None, "message": exc.detail, "user": user},
+                status_code=403,
+            )
+    return await starlette_http_exception_handler(request, exc)
 
 
 app.include_router(auth.router)

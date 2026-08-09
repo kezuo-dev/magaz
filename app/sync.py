@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+from datetime import timedelta, timezone
+
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -220,16 +222,31 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
 
         if book:
             # Снимаем книгу со ВСЕХ площадок (включая ту, где продали).
-            # При выключенном рубильнике (sync_enabled=False) только записываем
-            # продажу в БД — API не трогаем, книгу не снимаем.
-            from app.flags import is_sync_enabled
+            # Рубильников два, и они разные:
+            #   sync_enabled  — трогаем ли площадки вообще. Выключен: продажа
+            #                   только пишется в БД (аналитика живая), API молчит.
+            #   auto_withdraw — снимать ли книгу с ОСТАЛЬНЫХ площадок. Выключен:
+            #                   лот площадки продажи снимаем (там уже продано и
+            #                   так), а на других книга продолжает продаваться —
+            #                   ровно это обещает подпись тумблера в Настройках.
+            from app.flags import is_auto_withdraw_enabled, is_sync_enabled
             do_sell = is_sync_enabled(db)
+            cross_allowed = do_sell and is_auto_withdraw_enabled(db)
+            # Пропущенное кросс-снятие не даёт считать продажу обработанной:
+            # заказ останется processed=False, и после включения рубильника
+            # продажу можно будет отзеркалить.
+            cross_done = True
             for listing in book.listings:
                 if listing.status == ListingStatus.ACTIVE:
                     if not do_sell:
                         # Рубильник выключен — только пишем в журнал, не снимаем
                         _log(db, marketplace=listing.marketplace, action="sell", ok=True, book_id=book.id,
                              message=f"Продажа зафиксирована, но синхронизация выключена — лот {listing.marketplace} не тронут")
+                        continue
+                    if listing.marketplace != marketplace and not cross_allowed:
+                        cross_done = False
+                        _log(db, marketplace=listing.marketplace, action="withdraw_skipped", ok=True, book_id=book.id,
+                             message=f"Книга {book.sku}: автоснятие выключено — лот {listing.marketplace} не тронут")
                         continue
                     client = _get_active_client(db, listing.marketplace)
                     if client is None:
@@ -259,7 +276,9 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
             # заказ (он ищет его в базе) и поставил «Продана», а не «Снята».
             db.flush()
             refresh_book_status(db, book)
-            order.processed = True
+            # Обработанным считаем только заказ, по которому сделано всё, что
+            # должны были: сама продажа проведена и кросс-снятие не пропущено.
+            order.processed = do_sell and cross_done
             _log(db, marketplace=marketplace, action="order_sold", ok=True, book_id=book.id,
                  message=f"Заказ {info.external_order_id}: книга {book.sku} продана на {marketplace}")
         else:
@@ -270,6 +289,40 @@ def poll_marketplace_orders(db: Session, marketplace: str) -> int:
         _log(db, marketplace=marketplace, action="poll_orders", ok=True,
              message=f"Новых заказов: {new_count}")
     return new_count
+
+
+def _as_utc(dt):
+    """Привести datetime из БД к aware-UTC. None остаётся None.
+
+    SQLite отдаёт naive-значения, Postgres — aware. Сравнивать их между собой
+    напрямую нельзя (TypeError), поэтому наивные считаем UTC: мы всегда пишем
+    время через utcnow(), других источников у этих колонок нет.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _withdrawn_by_order(listing: Listing, order: Order) -> bool:
+    """Похоже ли, что лот сняли именно из-за этого заказа.
+
+    Возвращать в продажу при отмене нужно только те лоты, которые сняла эта
+    продажа. Лот, снятый раньше (вручную владельцем, слежением за остатками или
+    сверкой каталога), отменой чужого заказа трогать нельзя — иначе программа
+    сама возвращает на площадку товар, который сознательно убрали.
+
+    Признак: отметка синхронизации лота не раньше момента появления заказа (с
+    запасом в минуту на разбег часов между записями одного прохода). Если у лота
+    отметки нет вообще, считаем, что снят не этой продажей: продажа её всегда
+    проставляет.
+    """
+    synced = _as_utc(listing.last_synced_at)
+    created = _as_utc(order.created_at)
+    if synced is None or created is None:
+        return False
+    return synced >= created - timedelta(minutes=1)
 
 
 def process_cancelled_orders(db: Session, marketplace: str) -> int:
@@ -333,27 +386,53 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
                      ))
                 continue
 
-            # Заказ отменён до отгрузки — восстанавливаем лот и возвращаем книгу.
+            # Заказ отменён до отгрузки — восстанавливаем лоты и возвращаем книгу.
             for listing in book.listings:
                 if listing.status not in (ListingStatus.WITHDRAWN, ListingStatus.ERROR):
+                    continue
+                # Восстанавливаем ТОЛЬКО лоты, снятые этой продажей. Раньше цикл
+                # брал все снятые лоты книги без разбора: лот, снятый владельцем
+                # вручную месяц назад и уже удалённый в корзину WB, при отмене
+                # чужого Ozon-заказа доставался обратно и снова выставлялся на
+                # продажу. Признак «снят этой продажей» — отметка синхронизации
+                # лота не раньше момента появления заказа.
+                if not _withdrawn_by_order(listing, order):
+                    _log(db, marketplace=listing.marketplace, action="order_cancelled",
+                         ok=True, book_id=book.id,
+                         message=(
+                             f"Заказ {order_id} отменён: лот {listing.marketplace} снят "
+                             f"не этой продажей — оставлен как есть"
+                         ))
+                    continue
+                restore_client = _get_active_client(db, listing.marketplace)
+                if restore_client is None:
+                    # Площадка выключена — только локальный статус, без API.
+                    listing.status = ListingStatus.ACTIVE
+                    listing.last_synced_at = utcnow()
+                    listing.last_error = None
+                    _log(db, marketplace=listing.marketplace, action="order_cancelled",
+                         ok=True, book_id=book.id,
+                         message=f"Заказ {order_id} отменён: лот {listing.marketplace} возвращён локально (площадка выключена)")
+                    continue
+                # ACTIVE взводим только ПОСЛЕ удачного вызова: иначе при сбое
+                # (429/сеть) в базе остался бы активный лот, которого на площадке
+                # нет — каталог показывал бы «В продаже» книгу, купить которую нельзя.
+                try:
+                    restore_client.restore(listing)
+                except MarketplaceError as exc:
+                    listing.last_error = str(exc)
+                    _log(db, marketplace=listing.marketplace, action="order_cancelled",
+                         ok=False, book_id=book.id,
+                         message=f"Заказ {order_id} отменён, но вернуть карточку {book.sku} на {listing.marketplace} не удалось: {exc}")
                     continue
                 listing.status = ListingStatus.ACTIVE
                 listing.last_synced_at = utcnow()
                 listing.last_error = None
-                restore_client = _get_active_client(db, listing.marketplace)
-                if restore_client is not None:
-                    try:
-                        restore_client.restore(listing)
-                        msg = f"Заказ {order_id} отменён: карточка {book.sku} восстановлена на {listing.marketplace}"
-                        if restore_client.last_warning:
-                            msg += f". {restore_client.last_warning}"
-                        _log(db, marketplace=listing.marketplace, action="order_cancelled",
-                             ok=True, book_id=book.id, message=msg)
-                    except MarketplaceError as exc:
-                        listing.last_error = str(exc)
-                        _log(db, marketplace=listing.marketplace, action="order_cancelled",
-                             ok=False, book_id=book.id,
-                             message=f"Заказ {order_id} отменён, но вернуть карточку {book.sku} на {listing.marketplace} не удалось: {exc}")
+                msg = f"Заказ {order_id} отменён: карточка {book.sku} восстановлена на {listing.marketplace}"
+                if restore_client.last_warning:
+                    msg += f". {restore_client.last_warning}"
+                _log(db, marketplace=listing.marketplace, action="order_cancelled",
+                     ok=True, book_id=book.id, message=msg)
 
             refresh_book_status(db, book)
             order.cancelled = True

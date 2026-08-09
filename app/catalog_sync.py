@@ -86,17 +86,34 @@ def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing)
     сверка каталога обнаруживает факт пропажи постфактум (книга уже снята/продана),
     и нет смысла дёргать API — достаточно пометить локально. Статус книги
     пересчитывается единой функцией refresh_book_status.
+
+    Кросс-снятие подчиняется рубильнику «Автоснятие» из Настроек: пока он выключен,
+    лот пропавшей площадки помечаем снятым (это просто факт — там книги уже нет), а
+    лоты на ОСТАЛЬНЫХ площадках не трогаем. Иначе тумблер обещал бы одно
+    («не снимает книги с площадок»), а программа делала другое.
     """
+    from app.flags import is_auto_withdraw_enabled  # локальный импорт против цикла
+
     listing.status = ListingStatus.WITHDRAWN
     listing.last_synced_at = utcnow()
 
-    # Локально снимаем лоты на остальных площадках БЕЗ вызова API — сверка каталога
-    # реагирует на факт пропажи (книга уже снята/продана площадкой), поэтому живой
-    # вызов withdraw() только заархивирует Ozon-карточку, которая ещё в продаже.
-    for other_listing in book.listings:
-        if other_listing.marketplace != marketplace and other_listing.status == ListingStatus.ACTIVE:
-            other_listing.status = ListingStatus.WITHDRAWN
-            other_listing.last_synced_at = utcnow()
+    if is_auto_withdraw_enabled(db):
+        # Локально снимаем лоты на остальных площадках БЕЗ вызова API — сверка каталога
+        # реагирует на факт пропажи (книга уже снята/продана площадкой), поэтому живой
+        # вызов withdraw() только заархивирует Ozon-карточку, которая ещё в продаже.
+        for other_listing in book.listings:
+            if other_listing.marketplace != marketplace and other_listing.status == ListingStatus.ACTIVE:
+                other_listing.status = ListingStatus.WITHDRAWN
+                other_listing.last_synced_at = utcnow()
+    else:
+        skipped = [
+            l.marketplace for l in book.listings
+            if l.marketplace != marketplace and l.status == ListingStatus.ACTIVE
+        ]
+        if skipped:
+            _log(db, marketplace=marketplace, action="withdraw_skipped", ok=True,
+                 message=(f"Книга {book.sku}: автоснятие выключено — "
+                          f"лоты не тронуты: {', '.join(skipped)}"))
 
     refresh_book_status(db, book)
 
@@ -190,9 +207,15 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
         book.condition = book.condition or val("condition")
         if not book.description:
             book.description = val("description")
-        year = val("year")
-        if year and year.isdigit() and not book.year:
-            book.year = int(year)
+
+        # Год: приводим к int, отсекая .0 и строки вроде "2020 г."
+        year_raw = val("year")
+        if year_raw and not book.year:
+            try:
+                book.year = int(float(year_raw))
+            except (ValueError, TypeError):
+                pass  # игнорируем битое значение
+
         price = val("price")
         if price and book.price is None:
             try:
@@ -299,7 +322,25 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
 
 
 def sync_marketplace(db: Session, marketplace: str) -> dict:
-    """Полная сверка одной площадки: тянем каталог, апсертим, снимаем пропавшее.
+    """Полная сверка одной площадки под общим замком сверки.
+
+    Внешняя точка входа (кнопка «Загрузить из Ozon/WB» в Импорте). Замок тот же,
+    что у sync_all: два параллельных прохода по одним SKU дают конфликт на
+    уникальном лоте (book_id+marketplace) и рассинхрон статусов. Раньше эта
+    функция вызывалась в обход замка прямо из роута импорта.
+
+    Если сверка уже идёт — бросаем MarketplaceError, роут покажет это человеку.
+    """
+    if not _SYNC_LOCK.acquire(blocking=False):
+        raise MarketplaceError("Сверка уже выполняется — дождитесь завершения")
+    try:
+        return _sync_marketplace_locked(db, marketplace)
+    finally:
+        _SYNC_LOCK.release()
+
+
+def _sync_marketplace_locked(db: Session, marketplace: str) -> dict:
+    """Тело сверки одной площадки. Вызывать только с уже взятым _SYNC_LOCK.
 
     Возвращает {created, updated, skipped, removed}. Если площадка выключена/не
     настроена или вернула пустой каталог — сверку не делаем (защита от снятия
@@ -364,7 +405,9 @@ def _sync_all_locked(db: Session) -> dict:
     out: dict[str, dict] = {}
     for marketplace in enabled:
         try:
-            out[marketplace] = sync_marketplace(db, marketplace)
+            # Именно _locked-вариант: замок уже взят в sync_all, а Lock не
+            # реентрантный — повторный acquire дал бы отказ «сверка уже идёт».
+            out[marketplace] = _sync_marketplace_locked(db, marketplace)
             db.commit()
         except Exception as exc:  # noqa: BLE001 — сбой одной площадки не роняет сверку
             db.rollback()
@@ -439,10 +482,12 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
     # (снимаем только по явному нулю) — пропавшие карточки доснимет полная сверка,
     # которая тянет весь каталог целиком. Порог: не вернулась > трети ключей.
     missing = [k for k in keys if k not in stocks]
-    # Подозрительно, когда пропала БО́ЛЬШАЯ ЧАСТЬ ключей и это не единичные карточки:
-    # разом «удалить» полкаталога площадка не может, а вот отдать неполный ответ —
+    # Подозрительно, когда пропала ЗАМЕТНАЯ ДОЛЯ ключей и это не единичные карточки:
+    # разом «удалить» треть каталога площадка не может, а вот отдать неполный ответ —
     # запросто. Единичные пропажи (1-4 книги) считаем настоящими: это обычное дело.
-    suspicious = len(missing) >= 5 and len(missing) > len(keys) * 0.5
+    # Порог — треть (>=), а не половина (>): ровно половина пропавших ключей это
+    # такой же признак обрыва пагинации, а строгое сравнение её пропускало.
+    suspicious = len(missing) >= 5 and len(missing) * 3 >= len(keys)
     trust_missing = not suspicious
     if suspicious:
         _log(db, marketplace=marketplace, action="watch_stocks", ok=False,
