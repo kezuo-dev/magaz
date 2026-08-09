@@ -12,6 +12,8 @@
     <div class="notice err"><span>Неверный телефон или пароль.</span></div>
     {% elif error == 'pending' %}
     <div class="notice err"><span>Доступ пока не выдан. Владелец должен одобрить вашу заявку.</span></div>
+    {% elif error == 'locked' %}
+    <div class="notice err"><span>Слишком много попыток входа. Попробуйте через 15 минут.</span></div>
     {% endif %}
 
     <form method="post" action="/login" class="auth-form">
@@ -29,7 +31,10 @@
       <button type="submit">Войти</button>
     </form>
 
-    <p class="auth-foot">Нет учётной записи? <a href="/register">Зарегистрироваться</a></p>
+    <div class="auth-footer">
+      <p class="auth-foot">Нет учётной записи? <a href="/register">Зарегистрироваться</a></p>
+      <p class="auth-hint">После регистрации владелец одобрит доступ и назначит роль.</p>
+    </div>
   </div>
 </div>
 {% endblock %}

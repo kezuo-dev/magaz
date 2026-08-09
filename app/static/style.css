@@ -1,20 +1,20 @@
 /* ============================================================
-   Букинист — светлая чистая тема мониторинга.
+   Букинист — тёплая уютная тема мониторинга.
    Токены дизайна в :root, дальше — компоненты.
    ============================================================ */
 :root {
-  --bg: #f6f7fb;
-  --surface: #ffffff;
-  --surface-2: #f8fafc;
-  --ink: #1e2233;
-  --ink-soft: #5b6478;
-  --muted: #8b93a7;
-  --line: #e8ebf2;
-  --line-strong: #d5dae6;
+  --bg: #F7F4EF;
+  --surface: #FFFFFF;
+  --surface-2: #FBF9F5;
+  --ink: #1F2421;
+  --ink-soft: #5C635D;
+  --muted: #8B918C;
+  --line: #E7E1D7;
+  --line-strong: #D9D1C3;
 
-  --accent: #4f46e5;
-  --accent-strong: #4338ca;
-  --accent-soft: #eef2ff;
+  --accent: #C4612F;
+  --accent-strong: #A94E22;
+  --accent-soft: #F2E3D6;
 
   --ok: #15803d;
   --ok-soft: #e7f6ec;
@@ -25,23 +25,24 @@
 
   --radius: 14px;
   --radius-sm: 9px;
-  --shadow-sm: 0 1px 2px rgba(30,34,51,.05), 0 1px 3px rgba(30,34,51,.06);
-  --shadow-md: 0 4px 16px rgba(30,34,51,.08);
-  --shadow-lg: 0 10px 30px rgba(30,34,51,.12);
+  --shadow-sm: 0 1px 2px rgba(31,36,33,.06), 0 1px 4px rgba(31,36,33,.08);
+  --shadow-md: 0 4px 16px rgba(31,36,33,.1);
+  --shadow-lg: 0 10px 30px rgba(31,36,33,.14);
 }
 
 * { box-sizing: border-box; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  margin: 0; background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.5;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  margin: 0; background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.6;
+  font-weight: 400;
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; transition: color .15s ease; }
-a:hover { text-decoration: underline; }
+a:hover { color: var(--accent-strong); text-decoration: none; }
 
 /* Плавное появление контента страницы. */
-main { animation: page-in .32s cubic-bezier(.16,1,.3,1); }
-@keyframes page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+main { animation: page-in .35s cubic-bezier(.16,1,.3,1); }
+@keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 /* Уважаем системную настройку «меньше движения». */
 @media (prefers-reduced-motion: reduce) {
@@ -59,7 +60,7 @@ main { animation: page-in .32s cubic-bezier(.16,1,.3,1); }
   position: sticky; top: 0; align-self: flex-start;
   display: flex; flex-direction: column; gap: 4px;
   width: 236px; min-height: 100vh; flex-shrink: 0;
-  background: #171a2b; color: #fff; padding: 20px 14px;
+  background: #1F2421; color: #fff; padding: 20px 14px;
 }
 .sidebar .brand {
   color: #fff; font-weight: 700; font-size: 18px;
@@ -70,16 +71,31 @@ main { animation: page-in .32s cubic-bezier(.16,1,.3,1); }
 .sidebar nav { display: flex; flex-direction: column; gap: 4px; }
 .sidebar nav a, .sidebar .logout {
   position: relative; display: flex; align-items: center;
-  color: #b9c0d4; padding: 11px 15px; border-radius: 10px;
+  color: #B8BCBA; padding: 11px 15px; border-radius: 10px;
   font-size: 15px; font-weight: 500;
   transition: background .15s ease, color .15s ease;
 }
-.sidebar nav a:hover, .sidebar .logout:hover { background: #23273d; color: #fff; text-decoration: none; }
-.sidebar nav a.active { background: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 4px 14px rgba(79,70,229,.4); }
-.sidebar .logout { margin-top: auto; color: #767d94; }
-.sidebar .logout:hover { background: #3a2130; color: #fca5a5; }
+.sidebar nav a:hover, .sidebar .logout:hover { background: #2A2F2C; color: #fff; text-decoration: none; }
+.sidebar nav a.active {
+  background: var(--accent); color: #fff; font-weight: 600;
+  box-shadow: 0 4px 14px rgba(196,97,47,.4);
+}
+/* Выход — кнопка в форме (POST), а не ссылка: обнуляем вид кнопки, чтобы он
+   совпадал с пунктами меню. margin-top:auto переехал на форму — теперь именно
+   она прижимает выход к низу. */
+.logout-form { margin: auto 0 0; display: flex; }
+.sidebar .logout {
+  color: #8B918C; width: 100%;
+  background: none; border: none; box-shadow: none;
+  font-family: inherit; cursor: pointer; text-align: left;
+}
+.sidebar .logout:hover { background: #3a2a2a; color: #fca5a5; box-shadow: none; }
+.sidebar .logout:active { transform: none; }
 
 main { flex: 1; max-width: 1180px; margin: 28px auto; padding: 0 32px; min-width: 0; width: 100%; }
+/* Страницы без меню (вход, регистрация) — без отступов и ограничения ширины:
+   внутренний .auth-wrap сам центрирует карточку по всему экрану. */
+main.main-plain { max-width: none; margin: 0; padding: 0; }
 
 @media (max-width: 760px) {
   .layout { flex-direction: column; }
@@ -90,7 +106,7 @@ main { flex: 1; max-width: 1180px; margin: 28px auto; padding: 0 32px; min-width
   .sidebar .brand { padding: 6px 10px; font-size: 16px; }
   .sidebar nav { flex-direction: row; }
   .sidebar nav a, .sidebar .logout { padding: 9px 13px; font-size: 14px; white-space: nowrap; }
-  .sidebar .logout { margin-top: 0; margin-left: auto; }
+  .logout-form { margin: 0 0 0 auto; }
   main { margin: 16px auto; padding: 0 16px; }
 }
 
@@ -110,31 +126,36 @@ main { flex: 1; max-width: 1180px; margin: 28px auto; padding: 0 32px; min-width
 .page-head-left { display: flex; flex-direction: column; gap: 2px; }
 .page-eyebrow {
   font-size: 11px; font-weight: 700; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--accent); opacity: .8;
+  text-transform: uppercase; color: var(--accent); opacity: .85;
 }
 
-h1 { font-size: 24px; margin: 0; letter-spacing: -.02em; }
-h2 { font-size: 17px; margin-top: 28px; }
-.page-sub { margin: 4px 0 0; font-size: 14px; }
+h1 { font-size: 26px; margin: 0; letter-spacing: -.025em; font-weight: 600; }
+h2 { font-size: 18px; margin-top: 28px; font-weight: 600; }
+.page-sub { margin: 4px 0 0; font-size: 14px; font-weight: 400; }
 .head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
 
 /* ---------- Поля и кнопки ---------- */
 input, select, textarea, button {
-  font: inherit; padding: 9px 12px; border: 1px solid var(--line-strong);
+  font: inherit; padding: 10px 13px; border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm); background: #fff; color: var(--ink);
+  font-weight: 400;
 }
 input:focus, select:focus, textarea:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
 }
 button {
   background: var(--accent); color: #fff; border: 1px solid transparent; cursor: pointer;
-  font-weight: 600; padding: 9px 18px; border-radius: var(--radius-sm);
+  font-weight: 600; padding: 10px 20px; border-radius: 999px;
   box-shadow: var(--shadow-sm);
-  transition: background .15s ease, box-shadow .15s ease, transform .05s ease;
+  transition: background .15s ease, box-shadow .15s ease, transform .08s ease;
 }
-button:hover { background: var(--accent-strong); box-shadow: var(--shadow-md); }
-button:active { transform: translateY(1px); }
-button:disabled { background: var(--line-strong); color: #fff; cursor: not-allowed; box-shadow: none; }
+button:hover {
+  background: var(--accent-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+button:active { transform: translateY(0px); }
+button:disabled { background: var(--line-strong); color: var(--ink-soft); cursor: not-allowed; box-shadow: none; }
 button.danger { background: var(--danger); }
 button.danger:hover { background: #a5221f; }
 button.secondary { background: #eef1f6; color: var(--ink-soft); border-color: var(--line-strong); }
@@ -178,8 +199,8 @@ a.btn.muted:hover, .btn.muted:hover { background: #e3e8f0; }
 .stat-card.stat-ok::before { background: var(--ok); }
 .stat-card.stat-sold::before { background: var(--danger); }
 .stat-card.stat-muted::before { background: var(--muted); }
-.stat-card.stat-mp::before { background: #8b5cf6; }
-.stat-num { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+.stat-card.stat-mp::before { background: #9b6b47; }
+.stat-num { font-size: 32px; font-weight: 700; letter-spacing: -.03em; line-height: 1; }
 .stat-label { margin-top: 6px; font-size: 13px; color: var(--muted); font-weight: 500; }
 
 /* ---------- Тулбар поиска ---------- */
@@ -295,7 +316,7 @@ th.col-price { text-align: right; }
 .page-btn:active { transform: translateY(1px); }
 .page-btn.current {
   background: var(--accent); border-color: var(--accent); color: #fff;
-  box-shadow: 0 4px 12px rgba(79,70,229,.35); cursor: default;
+  box-shadow: 0 4px 12px rgba(196,97,47,.35); cursor: default;
 }
 .page-btn.current:hover { background: var(--accent); color: #fff; }
 .page-btn.nav { font-size: 20px; line-height: 1; color: var(--ink-soft); }
@@ -380,47 +401,57 @@ th.col-price { text-align: right; }
   align-items: center;
   justify-content: center;
   padding: 32px 20px;
-  background: var(--bg);
+  background: linear-gradient(135deg, #F7F4EF 0%, #F2E3D6 100%);
   box-sizing: border-box;
 }
 .auth-card {
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 36px 34px 30px;
-  box-shadow: var(--shadow-lg);
+  border-radius: 16px;
+  padding: 40px 36px 34px;
+  box-shadow: 0 12px 40px rgba(31,36,33,.12), 0 4px 12px rgba(31,36,33,.08);
 }
 .auth-card--center { text-align: center; }
+/* На входе и регистрации .notice лежит не в .notice-stack, а прямо в карточке,
+   поэтому отступ снизу задаём здесь — иначе ошибка липла к первому полю. */
+.auth-card > .notice { margin-bottom: 18px; }
 
 /* Бренд над формой. */
 .auth-brand {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  font-size: 20px;
+  gap: 10px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--ink);
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
-.auth-brand:hover { text-decoration: none; color: var(--ink); }
+.auth-brand:hover { text-decoration: none; color: var(--accent); }
 
-.auth-head { margin-bottom: 24px; }
-.auth-head h1 { margin: 0 0 8px; font-size: 26px; letter-spacing: -.02em; }
-.auth-head p { margin: 0; font-size: 14.5px; color: var(--muted); line-height: 1.55; }
+.auth-head { margin-bottom: 28px; }
+.auth-head h1 { margin: 0 0 10px; font-size: 28px; letter-spacing: -.025em; font-weight: 600; }
+.auth-head p { margin: 0; font-size: 15px; color: var(--ink-soft); line-height: 1.6; }
 .auth-card--center .auth-head { text-align: center; }
 
-.auth-form { display: flex; flex-direction: column; gap: 16px; }
-.auth-form .field { display: flex; flex-direction: column; gap: 7px; }
-.auth-form .field-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
-.auth-form .field-hint { font-size: 12.5px; color: var(--muted); }
+.auth-form { display: flex; flex-direction: column; gap: 18px; }
+.auth-form .field { display: flex; flex-direction: column; gap: 8px; }
+.auth-form .field-label { font-size: 14px; font-weight: 600; color: var(--ink); }
+.auth-form .field-hint { font-size: 13px; color: var(--muted); line-height: 1.5; }
 .auth-form input {
   width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 15px;
-  background: var(--surface);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
-.auth-form button { width: 100%; padding: 13px; font-size: 15px; margin-top: 4px; }
+.auth-form input:focus {
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.auth-form button { width: 100%; padding: 14px; font-size: 15px; margin-top: 6px; font-weight: 600; }
 
 /* Поле с глазиком: кнопка лежит поверх поля справа, поэтому у самого поля
    добавлен правый отступ — иначе текст пароля уезжал бы под кнопку. */
@@ -443,14 +474,39 @@ th.col-price { text-align: right; }
 /* Пароль открыт — глазик подсвечен акцентом, чтобы состояние было видно. */
 .auth-form .peek-btn.is-on { color: var(--accent); }
 .auth-form .peek-btn.is-on .peek-icon { opacity: 1; }
-.auth-hint { font-size: 12.5px; color: var(--muted); margin: -6px 0 0; }
-.auth-foot {
-  margin: 24px 0 0;
+
+.auth-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 24px;
   padding-top: 20px;
   border-top: 1px solid var(--line);
+}
+
+.auth-foot {
   text-align: center;
   font-size: 14px;
   color: var(--muted);
+  margin: 0;
+}
+
+.auth-foot a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.auth-foot a:hover {
+  text-decoration: underline;
+}
+
+.auth-hint {
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted-light);
+  margin: 0;
+  line-height: 1.4;
 }
 .auth-note {
   margin-top: 18px;
