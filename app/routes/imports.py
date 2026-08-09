@@ -223,16 +223,20 @@ def import_sync(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/fix-wb-ids")
-def fix_wb_external_ids(db: Session = Depends(get_db)):
+def fix_wb_external_ids(request: Request, db: Session = Depends(get_db)):
     """Служебная ручка: обновить external_id у всех WB-лотов на актуальный nmID.
 
     Запускается вручную один раз для миграции старых данных (где external_id был
     vendorCode). После этого catalog_sync.py автоматически обновляет external_id
     при каждой сверке, поэтому повторный запуск не нужен.
     """
+    from app.access import require_section
     from app.marketplaces import get_client
     from app.models import Listing, MarketplaceAccount
     from app.security import decrypt_credentials
+
+    # Только для владельца или руководителя (доступ к настройкам)
+    require_section(request, "settings")
 
     # Проверяем настройки WB
     account = db.scalar(
