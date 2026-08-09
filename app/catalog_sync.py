@@ -263,8 +263,12 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             db.add(listing)
             book.listings.append(listing)
         else:
-            if val("external_id") and not listing.external_id:
-                listing.external_id = val("external_id")
+            # external_id всегда обновляем, если площадка дала новое значение:
+            # у WB это nmID, который нужен для удаления в корзину. Старое значение
+            # могло быть vendorCode — перезаписываем на nmID.
+            new_ext_id = val("external_id")
+            if new_ext_id:
+                listing.external_id = new_ext_id
             # Ключ остатка держим в актуальном состоянии — по нему идёт слежение.
             if stock_key:
                 listing.stock_key = stock_key

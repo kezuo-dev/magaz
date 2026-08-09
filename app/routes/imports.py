@@ -222,6 +222,93 @@ def import_sync(request: Request, db: Session = Depends(get_db)):
     return RedirectResponse("/?synced=" + quote("; ".join(parts)), status_code=303)
 
 
+@router.post("/fix-wb-ids")
+def fix_wb_external_ids(db: Session = Depends(get_db)):
+    """Служебная ручка: обновить external_id у всех WB-лотов на актуальный nmID.
+
+    Запускается вручную один раз для миграции старых данных (где external_id был
+    vendorCode). После этого catalog_sync.py автоматически обновляет external_id
+    при каждой сверке, поэтому повторный запуск не нужен.
+    """
+    from app.marketplaces import get_client
+    from app.models import Listing, MarketplaceAccount
+    from app.security import decrypt_credentials
+    from sqlalchemy.orm import selectinload
+
+    # Проверяем настройки WB
+    account = db.scalar(
+        select(MarketplaceAccount).where(MarketplaceAccount.marketplace == "wildberries")
+    )
+    if not account or not account.enabled or not account.credentials_encrypted:
+        return RedirectResponse("/?synced=" + quote("WB площадка выключена или нет ключей"), status_code=303)
+
+    try:
+        creds = decrypt_credentials(account.credentials_encrypted)
+        client = get_client("wildberries", creds)
+    except Exception as exc:
+        return RedirectResponse("/?synced=" + quote(f"Не удалось подключиться к WB: {exc}"), status_code=303)
+
+    # Находим все WB-лоты
+    listings = db.scalars(
+        select(Listing)
+        .options(selectinload(Listing.book))
+        .where(Listing.marketplace == "wildberries")
+    ).all()
+
+    if not listings:
+        return RedirectResponse("/?synced=" + quote("WB-лотов в базе нет"), status_code=303)
+
+    # Запрашиваем все карточки с WB
+    try:
+        cards_data = client.list_catalog()
+    except MarketplaceError as exc:
+        return RedirectResponse("/?synced=" + quote(f"Не удалось получить каталог WB: {exc}"), status_code=303)
+
+    # Индекс по vendorCode для быстрого поиска
+    cards_by_vendor = {}
+    for card in cards_data:
+        vendor_code = card.get("sku")  # list_catalog возвращает sku как vendorCode
+        nm_id = card.get("external_id")  # и external_id как nmID (если есть)
+        if vendor_code and nm_id:
+            try:
+                # Проверяем, что nmID — это число
+                int(nm_id)
+                cards_by_vendor[vendor_code] = nm_id
+            except (ValueError, TypeError):
+                pass
+
+    updated = 0
+    already_ok = 0
+
+    for listing in listings:
+        current_ext_id = listing.external_id
+
+        # Проверяем, нужно ли обновлять
+        if current_ext_id:
+            try:
+                int(current_ext_id)
+                # Уже число — всё ок
+                already_ok += 1
+                continue
+            except (ValueError, TypeError):
+                pass  # Не число — нужно обновить
+
+        # Ищем nmID по SKU
+        sku = listing.sku
+        if not sku:
+            continue
+
+        nm_id = cards_by_vendor.get(sku)
+        if nm_id and nm_id != current_ext_id:
+            listing.external_id = nm_id
+            updated += 1
+
+    db.commit()
+
+    msg = f"WB external_id обновлён: {updated} лотов, {already_ok} уже корректных"
+    return RedirectResponse("/?synced=" + quote(msg), status_code=303)
+
+
 def _sources(db: Session) -> list[dict]:
     """Список площадок с признаком готовности (ключи включены) для шаблона."""
     accounts = {a.marketplace: a for a in db.scalars(select(MarketplaceAccount)).all()}
