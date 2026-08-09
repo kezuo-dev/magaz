@@ -1,56 +1,44 @@
 {% extends "base.html" %}
 {% block content %}
-{% set me = request.state.user %}
-<div class="page-head">
-  <div>
-    <h1>Мой профиль</h1>
-    <p class="page-sub muted">Ваша учётная запись и пароль для входа</p>
-  </div>
+<div class="page-header">
+  <h1>Профиль</h1>
 </div>
 
-<div class="notice-stack">
-  {% if notice %}<div class="notice ok"><span>{{ notice }}</span><button class="notice-close" type="button" aria-label="Закрыть">&times;</button></div>{% endif %}
-  {% if error %}<div class="notice err"><span>{{ error }}</span><button class="notice-close" type="button" aria-label="Закрыть">&times;</button></div>{% endif %}
-</div>
+{% if notice %}
+<div class="notice ok"><span>{{ notice }}</span></div>
+{% endif %}
+{% if error %}
+<div class="notice err"><span>{{ error }}</span></div>
+{% endif %}
 
 <div class="account-grid">
-  <section class="card account-card">
-    <h2>Кто вы</h2>
-    <dl class="account-facts">
-      <dt>ФИО</dt><dd>{{ me.full_name or 'Без имени' }}</dd>
-      <dt>Телефон</dt><dd class="mono">{{ me.phone_pretty }}</dd>
-      <dt>Роль</dt><dd>{{ me.role_label }}</dd>
-    </dl>
-    <p class="muted account-note">{{ me.role_description }}</p>
-  </section>
-
-  <section class="card account-card">
-    <h2>Сменить пароль</h2>
-    <p class="muted account-note">
-      Текущий пароль спрашиваем, чтобы с чужого незакрытого компьютера нельзя
-      было отобрать учётную запись.
-    </p>
-    {# Форма живёт вне Настроек: пароль меняет каждый сам, а Настройки открыты
-       только владельцу и руководителю. #}
-    <form method="post" action="/account/password" class="auth-form account-form">
-      <div class="field">
-        <label class="field-label" for="current_password">Текущий пароль</label>
-        <div class="field-peek">
-          <input type="password" name="current_password" id="current_password"
-                 required autocomplete="current-password">
-          <button type="button" class="peek-btn" data-peek="current_password"
-                  aria-label="Показать пароль" aria-pressed="false" title="Показать пароль">
-            <span class="peek-icon">👁</span>
-          </button>
-        </div>
+  <div class="account-card">
+    <div class="account-card-header">
+      <div class="account-avatar">
+        <span class="account-avatar-icon">👤</span>
       </div>
+      <div class="account-info">
+        <h2 class="account-name">{{ request.state.user.full_name }}</h2>
+        <p class="account-phone">{{ request.state.user.phone_pretty }}</p>
+        <span class="account-role">{{ request.state.user.role_label }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="account-card">
+    <h3 class="account-card-title">Смена пароля</h3>
+    <form method="post" action="/account/password" class="account-form">
+      <label class="field">
+        <span class="field-label">Текущий пароль</span>
+        <input type="password" name="current_password" required autocomplete="current-password">
+      </label>
 
       <div class="field">
-        <label class="field-label" for="new_password">Новый пароль</label>
+        <label class="field-label" for="new-password">Новый пароль</label>
         <div class="field-peek">
-          <input type="password" name="new_password" id="new_password" required
+          <input type="password" name="new_password" id="new-password" required
                  minlength="6" placeholder="Не менее 6 символов" autocomplete="new-password">
-          <button type="button" class="peek-btn" data-peek="new_password"
+          <button type="button" class="peek-btn" data-peek="new-password"
                   aria-label="Показать пароль" aria-pressed="false" title="Показать пароль">
             <span class="peek-icon">👁</span>
           </button>
@@ -58,40 +46,16 @@
       </div>
 
       <label class="field">
-        <span class="field-label">Новый пароль ещё раз</span>
-        <input type="password" name="repeat_password" required minlength="6"
-               autocomplete="new-password">
+        <span class="field-label">Повторите новый пароль</span>
+        <input type="password" name="repeat_password" required minlength="6" autocomplete="new-password">
       </label>
 
-      <button type="submit">Сменить пароль</button>
+      <button type="submit" class="btn-primary">Сменить пароль</button>
     </form>
-  </section>
+  </div>
 </div>
 
-<style>
-.account-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 18px;
-  align-items: start;
-}
-.account-card { padding: 20px 24px; }
-.account-card h2 { margin: 0 0 14px; font-size: 17px; }
-.account-facts { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; }
-.account-facts dt { font-size: 13px; color: var(--ink-soft); }
-.account-facts dd { margin: 0; font-size: 14.5px; font-weight: 600; }
-.account-note { font-size: 13px; line-height: 1.5; margin: 14px 0 0; }
-.account-form { margin-top: 16px; }
-</style>
 <script>
-  document.querySelectorAll(".notice-close").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      btn.closest(".notice").remove();
-    });
-  });
-
-  // Глазик у полей пароля — тот же приём, что на регистрации: меняем только
-  // type, значение и курсор не трогаем.
   document.querySelectorAll(".peek-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var input = document.getElementById(btn.dataset.peek);

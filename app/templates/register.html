@@ -51,6 +51,65 @@
 </div>
 
 <script>
+  // Форматирование номера телефона по маске +7 (999) 999-99-99
+  document.addEventListener("DOMContentLoaded", function() {
+    var phoneInput = document.querySelector('input[type="tel"]');
+    if (!phoneInput) return;
+
+    function formatPhone(value) {
+      // Убираем всё, кроме цифр
+      var digits = value.replace(/\D/g, '');
+
+      // Если начинается с 8, заменяем на 7
+      if (digits.startsWith('8')) {
+        digits = '7' + digits.slice(1);
+      }
+
+      // Если не начинается с 7, добавляем
+      if (!digits.startsWith('7')) {
+        digits = '7' + digits;
+      }
+
+      // Применяем маску +7 (999) 999-99-99
+      var formatted = '+7';
+      if (digits.length > 1) {
+        formatted += ' (' + digits.substring(1, 4);
+      }
+      if (digits.length >= 5) {
+        formatted += ') ' + digits.substring(4, 7);
+      }
+      if (digits.length >= 8) {
+        formatted += '-' + digits.substring(7, 9);
+      }
+      if (digits.length >= 10) {
+        formatted += '-' + digits.substring(9, 11);
+      }
+
+      return formatted;
+    }
+
+    phoneInput.addEventListener('input', function(e) {
+      var cursorPos = e.target.selectionStart;
+      var oldValue = e.target.value;
+      var newValue = formatPhone(oldValue);
+
+      e.target.value = newValue;
+
+      // Корректируем позицию курсора
+      if (cursorPos) {
+        var diff = newValue.length - oldValue.length;
+        e.target.selectionStart = e.target.selectionEnd = cursorPos + diff;
+      }
+    });
+
+    // Начальное форматирование при фокусе, если поле пустое
+    phoneInput.addEventListener('focus', function(e) {
+      if (!e.target.value || e.target.value === '+7') {
+        e.target.value = '+7 (';
+      }
+    });
+  });
+
   // Переключатель видимости пароля. Меняем только type у поля — значение и
   // положение курсора не трогаем, чтобы ввод не сбивался.
   document.querySelectorAll(".peek-btn").forEach(function (btn) {
