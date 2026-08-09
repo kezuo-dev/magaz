@@ -11,23 +11,25 @@
 <div class="notice err"><span>{{ error }}</span></div>
 {% endif %}
 
-<div class="account-grid">
-  <div class="account-card">
-    <div class="account-card-header">
-      <div class="account-avatar">
-        <span class="account-avatar-icon">👤</span>
-      </div>
-      <div class="account-info">
-        <h2 class="account-name">{{ request.state.user.full_name }}</h2>
-        <p class="account-phone">{{ request.state.user.phone_pretty }}</p>
-        <span class="account-role">{{ request.state.user.role_label }}</span>
-      </div>
+<div class="profile-layout">
+  <div class="profile-info">
+    <div class="profile-row">
+      <span class="profile-label">ФИО</span>
+      <span class="profile-value">{{ request.state.user.full_name }}</span>
+    </div>
+    <div class="profile-row">
+      <span class="profile-label">Телефон</span>
+      <span class="profile-value">{{ request.state.user.phone_pretty }}</span>
+    </div>
+    <div class="profile-row">
+      <span class="profile-label">Роль</span>
+      <span class="profile-badge">{{ request.state.user.role_label }}</span>
     </div>
   </div>
 
-  <div class="account-card">
-    <h3 class="account-card-title">Смена пароля</h3>
-    <form method="post" action="/account/password" class="account-form">
+  <div class="profile-form-wrap">
+    <h2>Смена пароля</h2>
+    <form method="post" action="/account/password" class="profile-form">
       <label class="field">
         <span class="field-label">Текущий пароль</span>
         <input type="password" name="current_password" required autocomplete="current-password">
@@ -50,7 +52,7 @@
         <input type="password" name="repeat_password" required minlength="6" autocomplete="new-password">
       </label>
 
-      <button type="submit" class="btn-primary">Сменить пароль</button>
+      <button type="submit">Сменить пароль</button>
     </form>
   </div>
 </div>

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Букинист{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css?v=21">
+  <link rel="stylesheet" href="/static/style.css?v=22">
 </head>
 <body>
   {# Вошедший пользователь. Вход один — по телефону, поэтому me есть всегда,
@@ -22,6 +22,8 @@
       <nav>
         {% if allowed('catalog') %}<a href="/" class="{{ 'active' if path == '/' or path.startswith('/books/') else '' }}"><span>Каталог</span></a>{% endif %}
         {% if allowed('analytics') %}<a href="/analytics" class="{{ 'active' if path.startswith('/analytics') else '' }}"><span>Аналитика</span></a>{% endif %}
+        {% if allowed('imports') %}<a href="/import" class="{{ 'active' if path.startswith('/import') else '' }}"><span>Обновление каталога</span></a>{% endif %}
+        {% if allowed('log') %}<a href="/log" class="{{ 'active' if path.startswith('/log') else '' }}"><span>Журнал</span></a>{% endif %}
         {% if allowed('settings') %}<a href="/settings" class="{{ 'active' if path.startswith('/settings') else '' }}"><span>Настройки</span></a>{% endif %}
         {# Профиль без can(): свой пароль меняет каждый, включая роли без разделов. #}
         <a href="/account" class="{{ 'active' if path.startswith('/account') else '' }}"><span>Профиль</span></a>
