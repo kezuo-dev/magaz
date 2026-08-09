@@ -135,23 +135,23 @@ def reconcile_all_withdrawn() -> None:
 
 
 def cleanup_wb_trash() -> None:
-    """Удалить снятые книги в корзину WB (ночью в 00:00 МСК).
+    """Удалить снятые книги в корзину WB (каждые 10 минут).
 
-    Обрабатывает только книги, снятые/проданные за ПОСЛЕДНИЕ СУТКИ — накопившееся
-    за день. Не трогает старые снятия → не схлопывает лимит API (429).
+    Обрабатывает только книги, снятые/проданные за ПОСЛЕДНИЕ 3 ЧАСА — небольшими
+    порциями по 5 карточек, чтобы не упереться в лимит API (429).
     """
     db = SessionLocal()
     try:
         if not is_sync_enabled(db):
             return
-        result = move_withdrawn_to_trash(db, days=1)  # только за последние сутки
+        result = move_withdrawn_to_trash(db, hours=3)  # только за последние 3 часа
         db.commit()
         processed = result.get("processed", 0)
         deleted = result.get("deleted", 0)
         failed = result.get("failed", 0)
         if processed:
             logger.info(
-                "Очистка корзины WB (за сутки): обработано %s, удалено %s, не удалось %s",
+                "Очистка корзины WB (за 3 часа): обработано %s, удалено %s, не удалось %s",
                 processed, deleted, failed
             )
     except Exception:  # noqa: BLE001 — сбой очистки не должен ронять планировщик
@@ -209,7 +209,7 @@ def start_scheduler() -> None:
     _scheduler.add_job(
         cleanup_wb_trash,
         trigger="interval",
-        minutes=30,
+        minutes=10,
         id="wb_trash_cleanup",
         max_instances=1,
         coalesce=True,
@@ -217,7 +217,7 @@ def start_scheduler() -> None:
     _scheduler.start()
     logger.info(
         "Планировщик запущен: заказы %s мин, остатки %s мин, сверка каталога %s мин, "
-        "сверка снятых 10 мин, очистка корзины WB в 00:00 МСК",
+        "сверка снятых 10 мин, очистка корзины WB 10 мин",
         settings.poll_interval_minutes,
         settings.stock_watch_interval_minutes,
         settings.catalog_sync_interval_minutes,

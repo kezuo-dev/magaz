@@ -37,12 +37,12 @@ def _log(db: Session, *, action, ok, message, book_id=None) -> None:
     )
 
 
-def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
+def move_withdrawn_to_trash(db: Session, days: int | None = None, hours: int | None = None) -> dict:
     """Удалить снятые книги в корзину WB. Возвращает {processed, deleted, failed}.
 
     days — ограничение по периоду: обрабатываем книги, обновлённые за последние
     N дней. None = без ограничения (все снятые книги за всё время).
-    По умолчанию 7 дней — безопасный период, не схлопывает лимит API.
+    hours — ограничение по часам (для частых запусков). Приоритетнее days.
     """
     # Проверяем настройки WB
     account = db.scalar(
@@ -70,13 +70,21 @@ def move_withdrawn_to_trash(db: Session, days: int | None = 7) -> dict:
             Book.listings.any(Listing.marketplace == "wildberries"),
         )
     )
-    if days is not None:
+    if hours is not None:
+        cutoff = utcnow() - timedelta(hours=hours)
+        query = query.where(Book.updated_at >= cutoff)
+    elif days is not None:
         cutoff = utcnow() - timedelta(days=days)
         query = query.where(Book.updated_at >= cutoff)
 
     books = db.scalars(query).all()
 
-    period_label = f"за последние {days} дн." if days else "за всё время"
+    if hours is not None:
+        period_label = f"за последний {hours} ч." if hours == 1 else f"за последние {hours} ч."
+    elif days is not None:
+        period_label = f"за последние {days} дн."
+    else:
+        period_label = "за всё время"
 
     if not books:
         _log(db, action="wb_trash", ok=True,
