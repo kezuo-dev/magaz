@@ -16,7 +16,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.catalog_sync import TARGET_FIELDS, sync_all, sync_marketplace, upsert_catalog_rows
 from app.db import get_db
@@ -223,33 +223,30 @@ def import_sync(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/fix-wb-ids")
-def fix_wb_external_ids(request: Request, db: Session = Depends(get_db)):
+def fix_wb_external_ids(db: Session = Depends(get_db)):
     """Служебная ручка: обновить external_id у всех WB-лотов на актуальный nmID.
 
     Запускается вручную один раз для миграции старых данных (где external_id был
     vendorCode). После этого catalog_sync.py автоматически обновляет external_id
     при каждой сверке, поэтому повторный запуск не нужен.
     """
-    from app.access import require_section
     from app.marketplaces import get_client
     from app.models import Listing, MarketplaceAccount
     from app.security import decrypt_credentials
-
-    # Только для владельца или руководителя (доступ к настройкам)
-    require_section(request, "settings")
+    from sqlalchemy.orm import selectinload
 
     # Проверяем настройки WB
     account = db.scalar(
         select(MarketplaceAccount).where(MarketplaceAccount.marketplace == "wildberries")
     )
     if not account or not account.enabled or not account.credentials_encrypted:
-        return RedirectResponse("/settings?error=" + quote("WB площадка выключена или нет ключей"), status_code=303)
+        return RedirectResponse("/?synced=" + quote("WB площадка выключена или нет ключей"), status_code=303)
 
     try:
         creds = decrypt_credentials(account.credentials_encrypted)
         client = get_client("wildberries", creds)
     except Exception as exc:
-        return RedirectResponse("/settings?error=" + quote(f"Не удалось подключиться к WB: {exc}"), status_code=303)
+        return RedirectResponse("/?synced=" + quote(f"Не удалось подключиться к WB: {exc}"), status_code=303)
 
     # Находим все WB-лоты
     listings = db.scalars(
@@ -259,13 +256,13 @@ def fix_wb_external_ids(request: Request, db: Session = Depends(get_db)):
     ).all()
 
     if not listings:
-        return RedirectResponse("/settings?error=" + quote("WB-лотов в базе нет"), status_code=303)
+        return RedirectResponse("/?synced=" + quote("WB-лотов в базе нет"), status_code=303)
 
     # Запрашиваем все карточки с WB
     try:
         cards_data = client.list_catalog()
     except MarketplaceError as exc:
-        return RedirectResponse("/settings?error=" + quote(f"Не удалось получить каталог WB: {exc}"), status_code=303)
+        return RedirectResponse("/?synced=" + quote(f"Не удалось получить каталог WB: {exc}"), status_code=303)
 
     # Индекс по vendorCode для быстрого поиска
     cards_by_vendor = {}
@@ -309,7 +306,7 @@ def fix_wb_external_ids(request: Request, db: Session = Depends(get_db)):
     db.commit()
 
     msg = f"WB external_id обновлён: {updated} лотов, {already_ok} уже корректных"
-    return RedirectResponse("/settings?wb_ids=" + quote(msg), status_code=303)
+    return RedirectResponse("/?synced=" + quote(msg), status_code=303)
 
 
 def _sources(db: Session) -> list[dict]:
