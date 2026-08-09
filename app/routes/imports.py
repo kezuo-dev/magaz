@@ -240,13 +240,13 @@ def fix_wb_external_ids(db: Session = Depends(get_db)):
         select(MarketplaceAccount).where(MarketplaceAccount.marketplace == "wildberries")
     )
     if not account or not account.enabled or not account.credentials_encrypted:
-        return RedirectResponse("/?synced=" + quote("WB площадка выключена или нет ключей"), status_code=303)
+        return RedirectResponse("/settings?error=" + quote("WB площадка выключена или нет ключей"), status_code=303)
 
     try:
         creds = decrypt_credentials(account.credentials_encrypted)
         client = get_client("wildberries", creds)
     except Exception as exc:
-        return RedirectResponse("/?synced=" + quote(f"Не удалось подключиться к WB: {exc}"), status_code=303)
+        return RedirectResponse("/settings?error=" + quote(f"Не удалось подключиться к WB: {exc}"), status_code=303)
 
     # Находим все WB-лоты
     listings = db.scalars(
@@ -256,13 +256,13 @@ def fix_wb_external_ids(db: Session = Depends(get_db)):
     ).all()
 
     if not listings:
-        return RedirectResponse("/?synced=" + quote("WB-лотов в базе нет"), status_code=303)
+        return RedirectResponse("/settings?error=" + quote("WB-лотов в базе нет"), status_code=303)
 
     # Запрашиваем все карточки с WB
     try:
         cards_data = client.list_catalog()
     except MarketplaceError as exc:
-        return RedirectResponse("/?synced=" + quote(f"Не удалось получить каталог WB: {exc}"), status_code=303)
+        return RedirectResponse("/settings?error=" + quote(f"Не удалось получить каталог WB: {exc}"), status_code=303)
 
     # Индекс по vendorCode для быстрого поиска
     cards_by_vendor = {}
@@ -306,7 +306,7 @@ def fix_wb_external_ids(db: Session = Depends(get_db)):
     db.commit()
 
     msg = f"WB external_id обновлён: {updated} лотов, {already_ok} уже корректных"
-    return RedirectResponse("/?synced=" + quote(msg), status_code=303)
+    return RedirectResponse("/settings?wb_ids=" + quote(msg), status_code=303)
 
 
 def _sources(db: Session) -> list[dict]:

@@ -37,7 +37,7 @@ def _accounts_by_mp(db: Session) -> dict[str, MarketplaceAccount]:
 
 
 @router.get("", response_class=HTMLResponse)
-def settings_page(request: Request, db: Session = Depends(get_db), saved: str = "", checked: str = "", withdraw: str = "", sync: str = ""):
+def settings_page(request: Request, db: Session = Depends(get_db), saved: str = "", checked: str = "", withdraw: str = "", sync: str = "", wb_ids: str = "", error: str = ""):
     accounts = _accounts_by_mp(db)
     cards = []
     for mp in Marketplace:
@@ -63,6 +63,8 @@ def settings_page(request: Request, db: Session = Depends(get_db), saved: str = 
             "auto_withdraw": is_auto_withdraw_enabled(db),
             "sync_enabled": is_sync_enabled(db),
             "sync": sync,
+            "wb_ids": wb_ids,
+            "error": error,
         },
     )
 

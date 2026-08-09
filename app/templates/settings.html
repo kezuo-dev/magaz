@@ -18,6 +18,8 @@
   {% if sync == 'off' %}<div class="notice err"><span>Синхронизация остановлена — все фоновые задачи на паузе.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
   {% if withdraw == 'on' %}<div class="notice ok"><span>Автоснятие включено — программа снимает проданные книги с других площадок.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
   {% if withdraw == 'off' %}<div class="notice ok"><span>Автоснятие выключено — программа только показывает статусы, ничего не снимает.</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if wb_ids %}<div class="notice ok"><span>{{ wb_ids }}</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
+  {% if error %}<div class="notice err"><span>{{ error }}</span><button type="button" class="notice-close" aria-label="Закрыть">&times;</button></div>{% endif %}
   {% if checked and ':' in checked %}
     {# Разбираем безопасно: распаковка split(':') падала бы с 500 на кривом
        параметре в адресе (например ?checked=abc или ?checked=a:b:c). #}
