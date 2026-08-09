@@ -16,7 +16,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.catalog_sync import TARGET_FIELDS, sync_all, sync_marketplace, upsert_catalog_rows
 from app.db import get_db
@@ -233,7 +233,6 @@ def fix_wb_external_ids(db: Session = Depends(get_db)):
     from app.marketplaces import get_client
     from app.models import Listing, MarketplaceAccount
     from app.security import decrypt_credentials
-    from sqlalchemy.orm import selectinload
 
     # Проверяем настройки WB
     account = db.scalar(
