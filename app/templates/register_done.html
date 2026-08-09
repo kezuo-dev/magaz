@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="auth-wrap">
-  <div class="auth-card auth-card--center">
+<div class="auth-page">
+  <div class="auth-box" style="text-align:center">
     <div class="auth-icon">✅</div>
-    <div class="auth-head">
+    <div class="auth-title">
       <h1>Готово</h1>
       <p>Учётная запись создана. Войти можно будет сразу после того, как владелец
          выдаст вам роль — обычно это быстро.</p>
     </div>
 
-    <a href="/login" class="btn auth-btn-wide">Попробовать войти</a>
+    <a href="/login" class="btn auth-submit">Попробовать войти</a>
   </div>
 </div>
 {% endblock %}

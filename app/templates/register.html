@@ -1,129 +1,50 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="auth-wrap">
-  <div class="auth-card">
-    <a href="/" class="auth-brand">📚 <span>Букинист</span></a>
-    <div class="auth-head">
+<div class="auth-page">
+  <div class="auth-box">
+    <a href="/" class="auth-logo">📚 <span>Букинист</span></a>
+
+    <div class="auth-title">
       <h1>Регистрация</h1>
       <p>Заведите учётную запись. Доступ откроется после того, как владелец выдаст вам роль.</p>
     </div>
 
     {% if error %}
-    <div class="notice err"><span>{{ error }}</span></div>
+    <div class="auth-alert err">{{ error }}</div>
     {% endif %}
 
     <form method="post" action="/register" class="auth-form">
-      <label class="field">
-        <span class="field-label">Телефон</span>
-        <input type="tel" name="phone" required autofocus
+      <div class="auth-field">
+        <label for="phone">Телефон</label>
+        <input type="tel" name="phone" id="phone" required autofocus
                placeholder="+7 (999) 123-45-67" autocomplete="tel">
-      </label>
-
-      <label class="field">
-        <span class="field-label">ФИО</span>
-        <input type="text" name="full_name" required
-               placeholder="Иванов Иван Иванович" autocomplete="name">
-      </label>
-
-      <div class="field">
-        <label class="field-label" for="password">Пароль</label>
-        {# Глазик показывает пароль, пока человек его придумывает: опечатку в
-           скрытом поле иначе не видно, а повторного ввода у нас нет. #}
-        <div class="field-peek">
-          <input type="password" name="password" id="password" required minlength="6"
-                 placeholder="Не менее 6 символов" autocomplete="new-password">
-          <button type="button" class="peek-btn" data-peek="password"
-                  aria-label="Показать пароль" aria-pressed="false" title="Показать пароль">
-            <span class="peek-icon">👁</span>
-          </button>
-        </div>
-        <span class="field-hint">Этим паролем вы будете входить вместе со своим номером.</span>
       </div>
 
-      <button type="submit">Зарегистрироваться</button>
+      <div class="auth-field">
+        <label for="full_name">ФИО</label>
+        <input type="text" name="full_name" id="full_name" required
+               placeholder="Иванов Иван Иванович" autocomplete="name">
+      </div>
+
+      <div class="auth-field">
+        <label for="password">Пароль</label>
+        <div class="auth-input-peek">
+          <input type="password" name="password" id="password" required minlength="6"
+                 placeholder="Не менее 6 символов" autocomplete="new-password">
+          <button type="button" class="peek-btn" data-peek="password" aria-label="Показать пароль">👁</button>
+        </div>
+        <span class="auth-hint">Этим паролем вы будете входить вместе со своим номером.</span>
+      </div>
+
+      <button type="submit" class="auth-submit">Зарегистрироваться</button>
     </form>
 
-    <div class="auth-footer">
-      <p class="auth-foot">Уже есть учётная запись? <a href="/login">Войти</a></p>
-      <p class="auth-hint">После регистрации владелец одобрит доступ и назначит роль.</p>
+    <div class="auth-bottom">
+      <p>Уже есть учётная запись? <a href="/login">Войти</a></p>
+      <p class="auth-note">После регистрации владелец одобрит доступ и назначит роль.</p>
     </div>
   </div>
 </div>
 
-<script>
-  // Форматирование номера телефона по маске +7 (999) 999-99-99
-  document.addEventListener("DOMContentLoaded", function() {
-    var phoneInput = document.querySelector('input[type="tel"]');
-    if (!phoneInput) return;
-
-    function formatPhone(value) {
-      // Убираем всё, кроме цифр
-      var digits = value.replace(/\D/g, '');
-
-      // Если начинается с 8, заменяем на 7
-      if (digits.startsWith('8')) {
-        digits = '7' + digits.slice(1);
-      }
-
-      // Если не начинается с 7, добавляем
-      if (!digits.startsWith('7')) {
-        digits = '7' + digits;
-      }
-
-      // Применяем маску +7 (999) 999-99-99
-      var formatted = '+7';
-      if (digits.length > 1) {
-        formatted += ' (' + digits.substring(1, 4);
-      }
-      if (digits.length >= 5) {
-        formatted += ') ' + digits.substring(4, 7);
-      }
-      if (digits.length >= 8) {
-        formatted += '-' + digits.substring(7, 9);
-      }
-      if (digits.length >= 10) {
-        formatted += '-' + digits.substring(9, 11);
-      }
-
-      return formatted;
-    }
-
-    phoneInput.addEventListener('input', function(e) {
-      var cursorPos = e.target.selectionStart;
-      var oldValue = e.target.value;
-      var newValue = formatPhone(oldValue);
-
-      e.target.value = newValue;
-
-      // Корректируем позицию курсора
-      if (cursorPos) {
-        var diff = newValue.length - oldValue.length;
-        e.target.selectionStart = e.target.selectionEnd = cursorPos + diff;
-      }
-    });
-
-    // Начальное форматирование при фокусе, если поле пустое
-    phoneInput.addEventListener('focus', function(e) {
-      if (!e.target.value || e.target.value === '+7') {
-        e.target.value = '+7 (';
-      }
-    });
-  });
-
-  // Переключатель видимости пароля. Меняем только type у поля — значение и
-  // положение курсора не трогаем, чтобы ввод не сбивался.
-  document.querySelectorAll(".peek-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var input = document.getElementById(btn.dataset.peek);
-      if (!input) return;
-      var shown = input.type === "text";
-      input.type = shown ? "password" : "text";
-      btn.setAttribute("aria-pressed", shown ? "false" : "true");
-      btn.setAttribute("aria-label", shown ? "Показать пароль" : "Скрыть пароль");
-      btn.title = shown ? "Показать пароль" : "Скрыть пароль";
-      btn.classList.toggle("is-on", !shown);
-      input.focus();
-    });
-  });
-</script>
+<script src="/static/auth.js?v=1"></script>
 {% endblock %}
