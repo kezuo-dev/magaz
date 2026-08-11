@@ -86,8 +86,15 @@ def watch_all_marketplaces_stocks() -> None:
             return
         results = watch_all_stocks(db)
         removed = sum(r.get("removed", 0) for r in results.values() if isinstance(r, dict))
+        halted = sum(r.get("halted", 0) for r in results.values() if isinstance(r, dict))
         if removed:
             logger.info("Слежение за остатками: снято книг %s (%s)", removed, results)
+        if halted:
+            # Сработал предохранитель массового снятия — в журнале базы уже есть
+            # запись с ошибкой, но в логах сервера это тоже должно быть видно.
+            logger.warning(
+                "Слежение за остатками остановлено предохранителем: %s книг разом без остатка", halted
+            )
     except Exception:  # noqa: BLE001 — сбой слежения не должен ронять планировщик
         db.rollback()
         logger.exception("Сбой слежения за остатками")

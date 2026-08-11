@@ -63,6 +63,13 @@ TARGET_FIELDS = {
 # Прод работает в один процесс (uvicorn --workers 1), поэтому его достаточно.
 _SYNC_LOCK = threading.Lock()
 
+# Сколько книг за один проход слежения можно снять по обнулившемуся остатку.
+# Продажи приходят по одной; десяток нулей за пять минут — это сбой площадки
+# (например, WB ещё не подхватил остатки свежей поставки). Порог абсолютный, а не
+# в долях каталога: на 50k книг «доля» всегда мала, а сто ложно снятых книг —
+# это сто карточек, которые перестали продаваться на обеих площадках.
+MAX_WATCH_REMOVALS_PER_RUN = 10
+
 
 def _log(db: Session, *, marketplace, action, ok, message) -> None:
     db.add(SyncLog(marketplace=marketplace, action=action, ok=ok, message=message))
@@ -498,14 +505,16 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
              message=(f"Не вернулось {len(missing)} из {len(keys)} остатков — вероятен сбой/лимит. "
                       f"Снимаем только по явному нулю; пропавшие ключи оставлены полной сверке"))
 
-    removed = 0
-    processed_books: set[int] = set()  # защита от дублей: одна книга снимается один раз
+    # Кандидаты на снятие: собираем список ДО того, как что-то менять. Нужно, чтобы
+    # оценить масштаб — пачка снятий за один проход это признак сбоя площадки, а не
+    # массовой продажи (см. ниже).
+    candidates: list[tuple[Listing, Book, str]] = []
+    seen_books: set[int] = set()  # защита от дублей: одна книга снимается один раз
     for listing in keyed:
         book = listing.book
         if book is None:
             continue
-        # Если книга уже обработана в этом проходе — пропускаем (защита от дублей stock_key)
-        if book.id in processed_books:
+        if book.id in seen_books:
             continue
         amount = stocks.get(listing.stock_key)
         if amount is None:
@@ -518,8 +527,35 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
             reason = "остаток 0"
         else:
             continue
+        candidates.append((listing, book, reason))
+        seen_books.add(book.id)
+
+    # Предохранитель на массовое снятие. Нулевой остаток — не доказательство
+    # продажи, а наблюдение: WB отдаёт 0 по только что заведённым карточкам, пока
+    # склад не подхватил поставку. Продажи же приходят по одной, а не десятками за
+    # пять минут, поэтому пачка нулей — это почти всегда сбой на стороне площадки.
+    #
+    # Раньше такой сбой обходился дорого: лоты помечались снятыми на ОБЕИХ
+    # площадках (кросс-снятие), книга получала статус «Продана»/«Снята», и сверка
+    # проданных дальше обнуляла живые остатки по неверной базе. Владелец
+    # восстанавливал остатки руками — через 10 минут всё повторялось.
+    #
+    # Порог абсолютный: пропускаем единичные снятия (обычные продажи), а на пачке
+    # останавливаемся целиком и пишем в журнал ошибку, чтобы человек увидел её в UI.
+    # Настоящие продажи в этот проход не потеряются — их поймает опрос заказов
+    # (он идёт по заказам, а не по остаткам) и полная сверка каталога.
+    if len(candidates) > MAX_WATCH_REMOVALS_PER_RUN:
+        skus = ", ".join(b.sku for _, b, _ in candidates[:10])
+        _log(db, marketplace=marketplace, action="watch_stocks", ok=False,
+             message=(f"Слежение за остатками ОСТАНОВЛЕНО: у {len(candidates)} из {len(keys)} книг "
+                      f"на {marketplace} остаток пропал разом (порог {MAX_WATCH_REMOVALS_PER_RUN}). "
+                      f"Похоже на сбой площадки, а не на продажи — книги не сняты. "
+                      f"Проверьте остатки вручную: {skus}…"))
+        return {"checked": len(keys), "removed": 0, "halted": len(candidates)}
+
+    removed = 0
+    for listing, book, reason in candidates:
         _cross_withdraw(db, book, marketplace, listing)
-        processed_books.add(book.id)
         removed += 1
         _log(db, marketplace=marketplace, action="watch_removed", ok=True,
              message=f"Книга {book.sku}: {reason} на {marketplace}")

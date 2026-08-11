@@ -272,8 +272,20 @@ class WBClient(MarketplaceClient):
             )
             for st in data.get("stocks") or []:
                 sku = st.get("sku")
-                if sku is not None:
-                    result[str(sku)] = st.get("amount") or 0
+                if sku is None:
+                    continue
+                # amount читаем строго: `or 0` превращал бы null («данных по этому
+                # баркоду нет») в честный ноль, а ноль вызывающий код трактует как
+                # снятие с продажи и обнуляет остаток на другой площадке. Запись без
+                # amount пропускаем — отсутствие ключа в ответе означает «не знаю»,
+                # и слежение такие ключи защищает порогом, а не снимает.
+                amount = st.get("amount")
+                if amount is None:
+                    continue
+                try:
+                    result[str(sku)] = int(amount)
+                except (TypeError, ValueError):
+                    continue
         return result
 
     def fetch_catalog(self) -> list[dict]:
