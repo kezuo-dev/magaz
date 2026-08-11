@@ -123,7 +123,9 @@ def reconcile_all_withdrawn() -> None:
     try:
         if not is_sync_enabled(db):
             return
-        results = reconcile_all_marketplaces(db)
+        # verbose=False: автозапуск молчит, когда исправлять нечего, иначе две
+        # площадки каждые 10 минут забивают журнал одинаковым «проверять нечего».
+        results = reconcile_all_marketplaces(db, verbose=False)
         db.commit()
         if results:
             logger.info("Сверка снятых книг: %s", results)
@@ -144,7 +146,9 @@ def cleanup_wb_trash() -> None:
     try:
         if not is_sync_enabled(db):
             return
-        result = move_withdrawn_to_trash(db, hours=3)  # только за последние 3 часа
+        # verbose=False: автозапуск молчит, когда удалять нечего, иначе журнал
+        # каждые 10 минут забивается одинаковым «нечего удалять».
+        result = move_withdrawn_to_trash(db, hours=3, verbose=False)
         db.commit()
         processed = result.get("processed", 0)
         deleted = result.get("deleted", 0)

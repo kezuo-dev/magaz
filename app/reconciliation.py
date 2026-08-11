@@ -52,24 +52,30 @@ def _get_active_client(db: Session, marketplace: str):
         return None
 
 
-def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
+def reconcile_withdrawn_books(db: Session, marketplace: str, verbose: bool = True) -> dict:
     """Сверить снятые книги с реальным состоянием на площадке.
 
     Для книг со статусом SOLD или WITHDRAWN спрашиваем площадку, какие карточки
     она всё ещё показывает «В продаже». Каждую найденную снимаем повторно (для
     Ozon это ещё и архивация карточки) и пишем в журнал.
 
+    verbose — писать в журнал итог, даже когда исправлять нечего. Ручной запуск
+    из UI ставит True (пользователь нажал кнопку и ждёт отчёта), автозапуск по
+    расписанию — False: две площадки каждые 10 минут дают ~288 записей
+    «проверять нечего» в сутки, в которых тонут настоящие ошибки.
+
     Возвращает статистику: {"checked": N, "fixed": M}.
     """
     client = _get_active_client(db, marketplace)
     if client is None:
-        _log(
-            db,
-            marketplace=marketplace,
-            action="reconcile_withdrawn",
-            ok=True,
-            message="Сверка снятых книг пропущена: площадка выключена или нет ключей",
-        )
+        if verbose:
+            _log(
+                db,
+                marketplace=marketplace,
+                action="reconcile_withdrawn",
+                ok=True,
+                message="Сверка снятых книг пропущена: площадка выключена или нет ключей",
+            )
         return {"checked": 0, "fixed": 0}
 
     # Находим книги, которые должны быть сняты (статус SOLD или WITHDRAWN), но у
@@ -91,13 +97,14 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
     ).all()
 
     if not books:
-        _log(
-            db,
-            marketplace=marketplace,
-            action="reconcile_withdrawn",
-            ok=True,
-            message="Сверка снятых книг: снятых книг для проверки нет",
-        )
+        if verbose:
+            _log(
+                db,
+                marketplace=marketplace,
+                action="reconcile_withdrawn",
+                ok=True,
+                message="Сверка снятых книг: снятых книг для проверки нет",
+            )
         return {"checked": 0, "fixed": 0}
 
     # Собираем ключи остатков (stock_key) для всех этих книг
@@ -110,13 +117,16 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
             book_by_key[listing.stock_key] = (book, listing)
 
     if not stock_keys:
-        _log(
-            db,
-            marketplace=marketplace,
-            action="reconcile_withdrawn",
-            ok=True,
-            message=f"Сверка снятых книг: у {len(books)} книг нет ключа остатка — проверить нечего",
-        )
+        # Молчим при автозапуске: отсутствие stock_key само не исчезнет, и
+        # повторять этот вывод каждые 10 минут — только засорять журнал.
+        if verbose:
+            _log(
+                db,
+                marketplace=marketplace,
+                action="reconcile_withdrawn",
+                ok=True,
+                message=f"Сверка снятых книг: у {len(books)} книг нет ключа остатка — проверить нечего",
+            )
         return {"checked": 0, "fixed": 0}
 
     # Спрашиваем площадку, какие карточки реально видны покупателям. Остаток тут
@@ -195,26 +205,31 @@ def reconcile_withdrawn_books(db: Session, marketplace: str) -> dict:
         # Обновляем статус книги
         refresh_book_status(db, book)
 
-    # Итог пишем ВСЕГДА, даже когда исправлять нечего: иначе после нажатия
-    # «Проверить снятые» в журнале не остаётся никакого следа и непонятно,
-    # выполнилась ли проверка вообще.
-    summary = f"Сверка снятых книг ({method}): проверено {checked}, исправлено {fixed}"
-    if failed:
-        summary += f", не удалось снять {failed}"
-    _log(
-        db,
-        marketplace=marketplace,
-        action="reconcile_withdrawn",
-        ok=failed == 0,
-        message=summary,
-    )
+    # При ручном запуске итог пишем всегда: иначе после нажатия «Проверить снятые»
+    # в журнале не остаётся никакого следа и непонятно, выполнилась ли проверка.
+    # При автозапуске — только если реально что-то исправили или не смогли снять.
+    if verbose or fixed or failed:
+        summary = f"Сверка снятых книг ({method}): проверено {checked}, исправлено {fixed}"
+        if failed:
+            summary += f", не удалось снять {failed}"
+        _log(
+            db,
+            marketplace=marketplace,
+            action="reconcile_withdrawn",
+            ok=failed == 0,
+            message=summary,
+        )
 
     return {"checked": checked, "fixed": fixed, "failed": failed}
 
 
-def reconcile_all_marketplaces(db: Session) -> dict:
-    """Сверить снятые книги на всех включённых площадках. Вызывается по расписанию."""
+def reconcile_all_marketplaces(db: Session, verbose: bool = False) -> dict:
+    """Сверить снятые книги на всех включённых площадках. Вызывается по расписанию.
+
+    verbose по умолчанию False: единственный вызывающий — планировщик, а ему
+    нужна тишина, пока нечего исправлять (см. reconcile_withdrawn_books).
+    """
     results = {}
     for marketplace in ["ozon", "wildberries"]:
-        results[marketplace] = reconcile_withdrawn_books(db, marketplace)
+        results[marketplace] = reconcile_withdrawn_books(db, marketplace, verbose=verbose)
     return results

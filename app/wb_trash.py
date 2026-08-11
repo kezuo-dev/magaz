@@ -37,20 +37,31 @@ def _log(db: Session, *, action, ok, message, book_id=None) -> None:
     )
 
 
-def move_withdrawn_to_trash(db: Session, days: int | None = None, hours: int | None = None) -> dict:
+def move_withdrawn_to_trash(
+    db: Session,
+    days: int | None = None,
+    hours: int | None = None,
+    verbose: bool = True,
+) -> dict:
     """Удалить снятые книги в корзину WB. Возвращает {processed, deleted, failed}.
 
     days — ограничение по периоду: обрабатываем книги, обновлённые за последние
     N дней. None = без ограничения (все снятые книги за всё время).
     hours — ограничение по часам (для частых запусков). Приоритетнее days.
+    verbose — писать в журнал даже когда удалять нечего. Ручной запуск из UI
+    ставит True (пользователь нажал кнопку и ждёт отчёта), автозапуск по
+    расписанию — False: иначе каждые 10 минут в журнал падает один и тот же
+    «нечего удалять», и за сутки набегает 144 бесполезные записи, в которых
+    тонут настоящие ошибки.
     """
     # Проверяем настройки WB
     account = db.scalar(
         select(MarketplaceAccount).where(MarketplaceAccount.marketplace == "wildberries")
     )
     if not account or not account.enabled or not account.credentials_encrypted:
-        _log(db, action="wb_trash", ok=True,
-             message="Очистка корзины WB пропущена: площадка выключена или нет ключей")
+        if verbose:
+            _log(db, action="wb_trash", ok=True,
+                 message="Очистка корзины WB пропущена: площадка выключена или нет ключей")
         return {"processed": 0, "deleted": 0, "failed": 0}
 
     try:
@@ -87,8 +98,9 @@ def move_withdrawn_to_trash(db: Session, days: int | None = None, hours: int | N
         period_label = "за всё время"
 
     if not books:
-        _log(db, action="wb_trash", ok=True,
-             message=f"Очистка корзины WB ({period_label}): снятых книг для удаления нет")
+        if verbose:
+            _log(db, action="wb_trash", ok=True,
+                 message=f"Очистка корзины WB ({period_label}): снятых книг для удаления нет")
         return {"processed": 0, "deleted": 0, "failed": 0}
 
     # Одним запросом узнаём, у каких книг есть СВЕЖИЙ активный (не отменённый)
@@ -118,6 +130,7 @@ def move_withdrawn_to_trash(db: Session, days: int | None = None, hours: int | N
 
     # Собираем nmID карточек для удаления
     to_delete = []
+    no_nm_id: list[str] = []  # SKU книг без nmID — для диагностического лога
     for book in books:
         # Пропускаем книги со свежим заказом: он ещё может быть отменён, и тогда
         # карточку придётся достать из корзины обратно.
@@ -126,18 +139,26 @@ def move_withdrawn_to_trash(db: Session, days: int | None = None, hours: int | N
 
         listing = next((l for l in book.listings if l.marketplace == "wildberries"), None)
         if not listing or not listing.external_id:
+            no_nm_id.append(f"{book.sku} (нет external_id)")
             continue
         try:
             nm_id = int(listing.external_id)
             to_delete.append((book, listing, nm_id))
         except (ValueError, TypeError):
             # external_id не число (старый vendorCode) — пропускаем
+            no_nm_id.append(f"{book.sku} (vendorCode={listing.external_id})")
             continue
 
     if not to_delete:
-        _log(db, action="wb_trash", ok=True,
-             message=f"Очистка корзины WB ({period_label}): у {len(books)} книг нет nmID для удаления")
-        return {"processed": 0, "deleted": 0, "failed": 0}
+        # Книги без nmID удалить нельзя (API требует именно nmID). Их карточек уже
+        # нет в каталоге WB — сверка каталога не может подтянуть им nmID. Молчим
+        # при автозапуске: причина не исчезнет сама, а повторять её каждые 10
+        # минут — только засорять журнал.
+        if verbose:
+            skus = ", ".join(no_nm_id) if no_nm_id else "—"
+            _log(db, action="wb_trash", ok=True,
+                 message=f"Очистка корзины WB ({period_label}): у {len(books)} книг нет nmID для удаления: {skus}")
+        return {"processed": 0, "deleted": 0, "failed": 0, "no_nm_id": len(no_nm_id)}
 
     deleted = 0
     failed = 0
@@ -182,9 +203,12 @@ def move_withdrawn_to_trash(db: Session, days: int | None = None, hours: int | N
         if i + BATCH_SIZE < len(to_delete):
             time.sleep(PAUSE_SECONDS)
 
-    _log(db, action="wb_trash", ok=(failed == 0),
-         message=f"Очистка корзины WB ({period_label}): обработано {len(to_delete)}, удалено {deleted}"
-                 + (f", не удалось {failed}" if failed else "")
-                 + (f", отложено {skipped}" if skipped else ""))
+    # Итог пишем при ручном запуске всегда, при автозапуске — только если реально
+    # что-то произошло (удалили, не смогли или отложили по лимиту).
+    if verbose or deleted or failed or skipped:
+        _log(db, action="wb_trash", ok=(failed == 0),
+             message=f"Очистка корзины WB ({period_label}): обработано {len(to_delete)}, удалено {deleted}"
+                     + (f", не удалось {failed}" if failed else "")
+                     + (f", отложено {skipped}" if skipped else ""))
 
     return {"processed": len(to_delete), "deleted": deleted, "failed": failed, "skipped": skipped}

@@ -386,7 +386,9 @@ def reconcile_withdrawn(db: Session = Depends(get_db)):
     повторно снимает те, что помечены у нас как withdrawn/sold. Выборка ограничена
     30 днями — старые снятые книги заведомо сняты с площадок.
     """
-    results = reconcile_all_marketplaces(db)
+    # verbose=True: пользователь нажал кнопку и ждёт отчёта, поэтому итог должен
+    # попасть в журнал даже когда исправлять было нечего.
+    results = reconcile_all_marketplaces(db, verbose=True)
     db.commit()
 
     parts = []
