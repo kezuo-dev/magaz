@@ -366,7 +366,14 @@ class WBClient(MarketplaceClient):
             amount = stocks.get(bc) if bc else None
             r["stock"] = amount
             if have_stock_data:
-                r["in_sale"] = bool(bc) and amount is not None and amount > 0
+                if amount is None:
+                    # WB не вернул остаток (неполный ответ склада / сбой API).
+                    # Оставляем in_sale=None → upsert_catalog_rows примет это как
+                    # «неизвестно» и не снимет книгу. Лучше оставить в продаже,
+                    # чем снять живую карточку из-за временного сбоя.
+                    r["in_sale"] = None
+                else:
+                    r["in_sale"] = bool(bc) and amount > 0
             else:
                 r["in_sale"] = bool(bc)
         return rows

@@ -70,6 +70,13 @@ _SYNC_LOCK = threading.Lock()
 # это сто карточек, которые перестали продаваться на обеих площадках.
 MAX_WATCH_REMOVALS_PER_RUN = 10
 
+# То же для ПОЛНОЙ сверки. Она авторитетнее слежения (тянет весь каталог, а не
+# остатки по ключам), поэтому порог выше: за час набегают продажи и ручные снятия.
+# Но и здесь пачка снятий — почти всегда неполный ответ площадки, а не реальность:
+# обрыв пагинации каталога или склад, не отдавший остатки. Такой ответ выглядит как
+# «каталог опустел», и без порога сверка снимала книги с ОБЕИХ площадок пачкой.
+MAX_SYNC_REMOVALS_PER_RUN = 50
+
 
 def _log(db: Session, *, marketplace, action, ok, message) -> None:
     db.add(SyncLog(marketplace=marketplace, action=action, ok=ok, message=message))
@@ -315,15 +322,43 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
         )
     ).all()
 
-    removed = 0
-    for listing in listings:
-        book = listing.book
-        if book is None:
-            continue
-        # Книга всё ещё в живой выгрузке — ничего не делаем.
-        if book.sku in live_skus:
-            continue
+    # Предохранитель от массового снятия при неполном ответе площадки.
+    #
+    # Два условия остановки:
+    # 1. Абсолютный порог MAX_SYNC_REMOVALS_PER_RUN: больше N снятий за проход —
+    #    слишком много даже для активного каталога. Защищает большие каталоги от
+    #    тотального сноса при полном отказе API.
+    # 2. Относительный: удаляется БОЛЬШЕ, чем нашлось живых. Если платформа вернула
+    #    3 карточки, а снять хочется 27 — это обрыв пагинации или сбой склада,
+    #    а не реальные продажи. Настоящие продажи приходят постепенно; разом
+    #    «продать» больше книг, чем сейчас в каталоге, невозможно.
+    would_remove = [l for l in listings if l.book and l.book.sku not in live_skus]
+    tripped = len(would_remove) > MAX_SYNC_REMOVALS_PER_RUN or (
+        live_skus and len(would_remove) > len(live_skus)
+    )
+    if tripped:
+        skus_sample = ", ".join(l.book.sku for l in would_remove[:10])
+        if len(would_remove) > MAX_SYNC_REMOVALS_PER_RUN:
+            reason = f"это больше порога {MAX_SYNC_REMOVALS_PER_RUN} за один проход"
+        else:
+            reason = f"а в продаже площадка показала всего {len(live_skus)}"
+        _log(
+            db,
+            marketplace=marketplace,
+            action="reconcile_removed",
+            ok=False,
+            message=(
+                f"Сверка каталога ОСТАНОВЛЕНА: {len(would_remove)} книг пропали из "
+                f"выгрузки {marketplace}, {reason}. Похоже на неполный ответ API, "
+                f"а не на реальные снятия — книги не тронуты. "
+                f"Проверьте вручную: {skus_sample}…"
+            ),
+        )
+        return 0
 
+    removed = 0
+    for listing in would_remove:
+        book = listing.book
         _cross_withdraw(db, book, marketplace, listing)
         removed += 1
         _log(db, marketplace=marketplace, action="reconcile_removed", ok=True,
