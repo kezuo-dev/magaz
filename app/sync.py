@@ -45,18 +45,24 @@ def refresh_book_status(db: Session, book: Book) -> str:
     Раньше статус зависел от того, КАКОЙ механизм заметил уход с продажи: опрос
     заказов ставил SOLD, а слежение за остатками — WITHDRAWN, хотя это была одна
     и та же продажа. Отсюда бралась путаница «снято/продано».
+
+    Присваивает book.status только если статус действительно изменился — тогда
+    onupdate=utcnow обновит updated_at. Иначе updated_at остаётся нетронутым.
     """
     still_active = any(l.status == ListingStatus.ACTIVE for l in book.listings)
     if still_active:
-        book.status = BookStatus.IN_STOCK
-        return book.status
+        new_status = BookStatus.IN_STOCK
+    else:
+        # Заказ — доказательство продажи, независимо от того, кто её обнаружил.
+        # Но отменённые заказы не считаются: книга с отменённым заказом не продана.
+        has_order = db.scalar(
+            select(Order.id).where(Order.book_id == book.id, Order.cancelled == False).limit(1)  # noqa: E712
+        ) is not None
+        new_status = BookStatus.SOLD if has_order else BookStatus.WITHDRAWN
 
-    # Заказ — доказательство продажи, независимо от того, кто её обнаружил.
-    # Но отменённые заказы не считаются: книга с отменённым заказом не продана.
-    has_order = db.scalar(
-        select(Order.id).where(Order.book_id == book.id, Order.cancelled == False).limit(1)  # noqa: E712
-    ) is not None
-    book.status = BookStatus.SOLD if has_order else BookStatus.WITHDRAWN
+    # Присваиваем только если статус изменился — иначе onupdate не сработает.
+    if book.status != new_status:
+        book.status = new_status
     return book.status
 
 
