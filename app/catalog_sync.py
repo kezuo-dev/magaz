@@ -543,6 +543,13 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
     # Кандидаты на снятие: собираем список ДО того, как что-то менять. Нужно, чтобы
     # оценить масштаб — пачка снятий за один проход это признак сбоя площадки, а не
     # массовой продажи (см. ниже).
+    #
+    # ВАЖНО: В кандидаты попадают только книги, которые РЕАЛЬНО нужно снимать:
+    # - Статус PUBLISHED (уже снятые/проданные книги не трогаем)
+    # - Есть лоты на ДРУГИХ площадках (книги только на этой площадке не трогаем)
+    #
+    # Это критично для предохранителя: он должен срабатывать только на реальные
+    # массовые продажи, а не на книги, которые и так не трогаем.
     candidates: list[tuple[Listing, Book, str]] = []
     seen_books: set[int] = set()  # защита от дублей: одна книга снимается один раз
     for listing in keyed:
@@ -551,6 +558,19 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
             continue
         if book.id in seen_books:
             continue
+
+        # Пропускаем книги, которые уже не PUBLISHED (уже обработаны ранее)
+        if book.status != BookStatus.PUBLISHED:
+            continue
+
+        # Пропускаем книги ТОЛЬКО на этой площадке (кросс-снимать не с чего)
+        has_other_listings = any(
+            other.marketplace != marketplace and other.status == ListingStatus.PUBLISHED
+            for other in book.listings
+        )
+        if not has_other_listings:
+            continue
+
         amount = stocks.get(listing.stock_key)
         if amount is None:
             # Ключ не вернулся. Снимаем как «карточка пропала» только если ответ
