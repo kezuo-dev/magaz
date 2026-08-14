@@ -559,13 +559,13 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
         if book.id in seen_books:
             continue
 
-        # Пропускаем книги, которые уже не PUBLISHED (уже обработаны ранее)
-        if book.status != BookStatus.PUBLISHED:
+        # Пропускаем книги, которые уже не IN_STOCK (уже обработаны ранее)
+        if book.status != BookStatus.IN_STOCK:
             continue
 
         # Пропускаем книги ТОЛЬКО на этой площадке (кросс-снимать не с чего)
         has_other_listings = any(
-            other.marketplace != marketplace and other.status == ListingStatus.PUBLISHED
+            other.marketplace != marketplace and other.status == ListingStatus.ACTIVE
             for other in book.listings
         )
         if not has_other_listings:
