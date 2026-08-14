@@ -90,11 +90,11 @@ def watch_all_marketplaces_stocks() -> None:
         if removed:
             logger.info("Слежение за остатками: снято книг %s (%s)", removed, results)
         if halted:
-            # Сработал предохранитель массового снятия — в журнале базы уже есть
-            # запись с ошибкой, но в логах сервера это тоже должно быть видно.
-            logger.warning(
-                "Слежение за остатками остановлено предохранителем: %s книг разом без остатка", halted
-            )
+            # Сработал предохранитель массового снятия. Дедупликация уже есть в
+            # catalog_sync.watch_stocks — он пишет в журнал только при первом
+            # срабатывании. В логах сервера молчим: иначе при длительном сбое WB
+            # каждые 5 минут вываливается warning, хотя ничего не изменилось.
+            pass
     except Exception:  # noqa: BLE001 — сбой слежения не должен ронять планировщик
         db.rollback()
         logger.exception("Сбой слежения за остатками")
@@ -146,8 +146,9 @@ def reconcile_all_withdrawn() -> None:
 def cleanup_wb_trash() -> None:
     """Удалить снятые книги в корзину WB (каждые 10 минут).
 
-    Обрабатывает только книги, снятые/проданные за ПОСЛЕДНИЕ 3 ЧАСА — небольшими
-    порциями по 5 карточек, чтобы не упереться в лимит API (429).
+    Обрабатывает до MAX_BOOKS_PER_RUN книг (100) за проход, старые первыми (FIFO).
+    Не зависает на больших backlog'ах — берёт порцию, остальное в следующий раз.
+    Пачки по 30 карточек, пауза 2 секунды — баланс скорости и надёжности.
     """
     db = SessionLocal()
     try:
@@ -155,14 +156,14 @@ def cleanup_wb_trash() -> None:
             return
         # verbose=False: автозапуск молчит, когда удалять нечего, иначе журнал
         # каждые 10 минут забивается одинаковым «нечего удалять».
-        result = move_withdrawn_to_trash(db, hours=3, verbose=False)
+        result = move_withdrawn_to_trash(db, limit=None, verbose=False)
         db.commit()
         processed = result.get("processed", 0)
         deleted = result.get("deleted", 0)
         failed = result.get("failed", 0)
         if processed:
             logger.info(
-                "Очистка корзины WB (за 3 часа): обработано %s, удалено %s, не удалось %s",
+                "Очистка корзины WB: обработано %s, удалено %s, не удалось %s",
                 processed, deleted, failed
             )
     except Exception:  # noqa: BLE001 — сбой очистки не должен ронять планировщик

@@ -1,8 +1,14 @@
 """Удаление снятых книг в корзину WB.
 
-Проходит по книгам со статусом SOLD/WITHDRAWN, у которых есть лот WB с
-остатком 0, и удаляет карточки в корзину небольшими пачками с паузами (чтобы не
-схлопнуть лимит API 429). Вызывается по кнопке из UI или по расписанию.
+Проходит по книгам со статусом SOLD/WITHDRAWN, у которых есть лот WB, и удаляет
+карточки в корзину пачками с паузами (чтобы не схлопнуть лимит API 429).
+
+СТРАТЕГИЯ ОБРАБОТКИ:
+- Сортировка по updated_at ASC (старые книги первыми) — FIFO, не накапливаем backlog
+- Лимит за проход (MAX_BOOKS_PER_RUN) — не блокируем scheduler надолго
+- Пачки по BATCH_SIZE карточек — баланс между скоростью и лимитами
+- Пауза PAUSE_SECONDS между пачками — даём API WB остыть
+- При 429 останавливаемся gracefully — остаток обработает следующий запуск
 
 Книги со свежим неотменённым заказом (моложе CANCEL_GRACE_DAYS) не трогаем:
 заказ ещё могут отменить, и тогда карточку пришлось бы достать из корзины.
@@ -24,6 +30,19 @@ from app.security import decrypt_credentials
 # отменят, её не придётся достать из корзины.
 CANCEL_GRACE_DAYS = 14
 
+# Максимум книг за один проход. Защита от зависания scheduler'а: если backlog
+# огромный (тысячи книг), не обрабатываем их все за раз — возьмём порцию, а
+# остальное заберёт следующий запуск. 100 книг × 2 секунды на пачку = ~3 минуты.
+MAX_BOOKS_PER_RUN = 100
+
+# Размер пачки для одного DELETE-запроса к WB. API принимает массив nmID,
+# лимит неизвестен, но 30 работает стабильно (проверено).
+BATCH_SIZE = 30
+
+# Пауза между пачками. WB жёстко лимитирует DELETE — даём API остыть.
+# 2 секунды — баланс между скоростью и надёжностью.
+PAUSE_SECONDS = 2
+
 
 def _log(db: Session, *, action, ok, message, book_id=None) -> None:
     db.add(
@@ -39,15 +58,15 @@ def _log(db: Session, *, action, ok, message, book_id=None) -> None:
 
 def move_withdrawn_to_trash(
     db: Session,
-    days: int | None = None,
-    hours: int | None = None,
+    limit: int | None = None,
     verbose: bool = True,
 ) -> dict:
     """Удалить снятые книги в корзину WB. Возвращает {processed, deleted, failed}.
 
-    days — ограничение по периоду: обрабатываем книги, обновлённые за последние
-    N дней. None = без ограничения (все снятые книги за всё время).
-    hours — ограничение по часам (для частых запусков). Приоритетнее days.
+    limit — максимум книг за проход. None = применяется MAX_BOOKS_PER_RUN.
+    Защита от зависания: если backlog огромный, берём порцию, остальное — в
+    следующий раз. FIFO (старые книги первыми) гарантирует, что backlog не растёт.
+
     verbose — писать в журнал даже когда удалять нечего. Ручной запуск из UI
     ставит True (пользователь нажал кнопку и ждёт отчёта), автозапуск по
     расписанию — False: иначе каждые 10 минут в журнал падает один и тот же
@@ -72,7 +91,14 @@ def move_withdrawn_to_trash(
              message=f"Не удалось подключиться к WB: {exc}")
         return {"processed": 0, "deleted": 0, "failed": 0}
 
-    # Находим снятые книги с лотом WB
+    # Находим снятые книги с лотом WB. КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: сортируем по
+    # updated_at ASC (старые первыми) и берём limit — это FIFO-очередь, которая
+    # гарантирует, что backlog постепенно рассасывается, а не накапливается.
+    #
+    # Старая логика (hours=3) создавала скользящее окно: книги старше 3 часов
+    # пропадали из выборки навсегда, даже если их не успели удалить. При большом
+    # потоке продаж (> 30 книг/час) backlog рос без границ.
+    max_books = limit if limit is not None else MAX_BOOKS_PER_RUN
     query = (
         select(Book)
         .options(selectinload(Book.listings))
@@ -80,27 +106,16 @@ def move_withdrawn_to_trash(
             Book.status.in_([BookStatus.SOLD, BookStatus.WITHDRAWN]),
             Book.listings.any(Listing.marketplace == "wildberries"),
         )
+        .order_by(Book.updated_at.asc())  # FIFO: старые книги первыми
+        .limit(max_books)
     )
-    if hours is not None:
-        cutoff = utcnow() - timedelta(hours=hours)
-        query = query.where(Book.updated_at >= cutoff)
-    elif days is not None:
-        cutoff = utcnow() - timedelta(days=days)
-        query = query.where(Book.updated_at >= cutoff)
 
     books = db.scalars(query).all()
-
-    if hours is not None:
-        period_label = f"за последний {hours} ч." if hours == 1 else f"за последние {hours} ч."
-    elif days is not None:
-        period_label = f"за последние {days} дн."
-    else:
-        period_label = "за всё время"
 
     if not books:
         if verbose:
             _log(db, action="wb_trash", ok=True,
-                 message=f"Очистка корзины WB ({period_label}): снятых книг для удаления нет")
+                 message=f"Очистка корзины WB: снятых книг для удаления нет")
         return {"processed": 0, "deleted": 0, "failed": 0}
 
     # Одним запросом узнаём, у каких книг есть СВЕЖИЙ активный (не отменённый)
@@ -155,21 +170,23 @@ def move_withdrawn_to_trash(
         # при автозапуске: причина не исчезнет сама, а повторять её каждые 10
         # минут — только засорять журнал.
         if verbose:
-            skus = ", ".join(no_nm_id) if no_nm_id else "—"
+            skus = ", ".join(no_nm_id[:10]) if no_nm_id else "—"
+            if len(no_nm_id) > 10:
+                skus += f"… (всего {len(no_nm_id)})"
             _log(db, action="wb_trash", ok=True,
-                 message=f"Очистка корзины WB ({period_label}): у {len(books)} книг нет nmID для удаления: {skus}")
+                 message=f"Очистка корзины WB: у {len(books)} книг нет nmID для удаления: {skus}")
         return {"processed": 0, "deleted": 0, "failed": 0, "no_nm_id": len(no_nm_id)}
 
     deleted = 0
     failed = 0
     skipped = 0  # не обработали из-за лимита (попробуем в следующий раз)
 
-    # Удаляем небольшими пачками с паузами.
+    # Удаляем пачками с паузами. Увеличены размеры пачек (5 → 30) и уменьшены
+    # паузы (5с → 2с) для ускорения обработки при большом потоке продаж.
+    #
     # WB лимитирует этот эндпоинт жёстко: при 429 НЕ пробуем повторно и НЕ
     # разбиваем на единичные запросы — это только удваивает нагрузку. Просто
-    # останавливаемся: остаток обработает следующий ночной запуск.
-    BATCH_SIZE = 5
-    PAUSE_SECONDS = 5
+    # останавливаемся: остаток обработает следующий запуск через 10 минут.
 
     for i in range(0, len(to_delete), BATCH_SIZE):
         batch = to_delete[i:i + BATCH_SIZE]
@@ -182,8 +199,9 @@ def move_withdrawn_to_trash(
             )
             for book, listing, nm in batch:
                 deleted += 1
-                _log(db, action="wb_trash", ok=True,
-                     message=f"Карточка {nm} удалена в корзину WB")
+                if verbose:
+                    _log(db, action="wb_trash", ok=True, book_id=book.id,
+                         message=f"Карточка {nm} ({book.sku}) удалена в корзину WB")
         except MarketplaceError as exc:
             err = str(exc)
             # 429 — лимит. Останавливаемся, не множим запросы.
@@ -196,8 +214,8 @@ def move_withdrawn_to_trash(
             # Другая ошибка — пишем и идём дальше
             for book, listing, nm in batch:
                 failed += 1
-                _log(db, action="wb_trash", ok=False,
-                     message=f"Не удалось удалить карточку {nm} в корзину WB: {exc}")
+                _log(db, action="wb_trash", ok=False, book_id=book.id,
+                     message=f"Не удалось удалить карточку {nm} ({book.sku}) в корзину WB: {exc}")
 
         # Пауза между пачками (кроме последней)
         if i + BATCH_SIZE < len(to_delete):
@@ -207,7 +225,7 @@ def move_withdrawn_to_trash(
     # что-то произошло (удалили, не смогли или отложили по лимиту).
     if verbose or deleted or failed or skipped:
         _log(db, action="wb_trash", ok=(failed == 0),
-             message=f"Очистка корзины WB ({period_label}): обработано {len(to_delete)}, удалено {deleted}"
+             message=f"Очистка корзины WB: обработано {len(to_delete)}, удалено {deleted}"
                      + (f", не удалось {failed}" if failed else "")
                      + (f", отложено {skipped}" if skipped else ""))
 

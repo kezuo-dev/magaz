@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import threading
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.marketplaces import MarketplaceError, get_client, is_supported
@@ -580,12 +580,36 @@ def watch_stocks(db: Session, marketplace: str) -> dict:
     # Настоящие продажи в этот проход не потеряются — их поймает опрос заказов
     # (он идёт по заказам, а не по остаткам) и полная сверка каталога.
     if len(candidates) > MAX_WATCH_REMOVALS_PER_RUN:
-        skus = ", ".join(b.sku for _, b, _ in candidates[:10])
-        _log(db, marketplace=marketplace, action="watch_stocks", ok=False,
-             message=(f"Слежение за остатками ОСТАНОВЛЕНО: у {len(candidates)} из {len(keys)} книг "
-                      f"на {marketplace} остаток пропал разом (порог {MAX_WATCH_REMOVALS_PER_RUN}). "
-                      f"Похоже на сбой площадки, а не на продажи — книги не сняты. "
-                      f"Проверьте остатки вручную: {skus}…"))
+        skus_sample = ", ".join(b.sku for _, b, _ in candidates[:10])
+        all_skus = ", ".join(b.sku for _, b, _ in candidates)
+
+        # Дедупликация: не спамим одной и той же ошибкой каждые 5 минут.
+        # Проверяем последнее срабатывание: если то же количество книг и недавно
+        # (< 30 минут), молчим. Сбой WB может длиться часами — не нужно забивать
+        # журнал сотнями одинаковых записей.
+        from datetime import timedelta
+        recent_halt = db.scalar(
+            select(SyncLog).where(
+                SyncLog.marketplace == marketplace,
+                SyncLog.action == "watch_stocks",
+                SyncLog.ok == False,
+                SyncLog.message.like(f"%ОСТАНОВЛЕНО: у {len(candidates)} из%"),
+                SyncLog.created_at >= utcnow() - timedelta(minutes=30)
+            ).order_by(desc(SyncLog.created_at)).limit(1)
+        )
+
+        if not recent_halt:
+            # Первое срабатывание или изменился масштаб — пишем полный отчёт
+            _log(db, marketplace=marketplace, action="watch_stocks", ok=False,
+                 message=(f"Слежение за остатками ОСТАНОВЛЕНО: у {len(candidates)} из {len(keys)} книг "
+                          f"на {marketplace} остаток пропал разом (порог {MAX_WATCH_REMOVALS_PER_RUN}). "
+                          f"Похоже на сбой площадки, а не на продажи — книги не сняты. "
+                          f"Проверьте остатки вручную: {skus_sample}…"))
+            # Полный список в отдельной записи для анализа
+            _log(db, marketplace=marketplace, action="watch_stocks_halted_full", ok=False,
+                 message=f"Полный список {len(candidates)} книг, остановленных предохранителем: {all_skus}")
+        # Если недавно уже было — молчим, не спамим в журнал
+
         return {"checked": len(keys), "removed": 0, "halted": len(candidates)}
 
     removed = 0
