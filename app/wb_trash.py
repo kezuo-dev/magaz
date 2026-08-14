@@ -206,10 +206,10 @@ def move_withdrawn_to_trash(
             err = str(exc)
             # 429 — лимит. Останавливаемся, не множим запросы.
             if "429" in err or "лимит" in err.lower():
-                skipped = len(to_delete) - i
+                skipped = len(to_delete) - i  # всё, что осталось (включая текущую пачку)
                 _log(db, action="wb_trash", ok=True,
-                     message=f"Лимит WB: остановились после {deleted} удалений, "
-                             f"отложено {skipped} карточек на следующий запуск")
+                     message=f"Лимит WB при удалении в корзину: остановились, "
+                             f"отложено {skipped} карточек")
                 break
             # Другая ошибка — пишем и идём дальше
             for book, listing, nm in batch:
@@ -223,10 +223,18 @@ def move_withdrawn_to_trash(
 
     # Итог пишем при ручном запуске всегда, при автозапуске — только если реально
     # что-то произошло (удалили, не смогли или отложили по лимиту).
+    # "Обработано" = реально отправлено в API (удалено + не удалось), без отложенных.
+    processed = deleted + failed
     if verbose or deleted or failed or skipped:
-        _log(db, action="wb_trash", ok=(failed == 0),
-             message=f"Очистка корзины WB: обработано {len(to_delete)}, удалено {deleted}"
-                     + (f", не удалось {failed}" if failed else "")
-                     + (f", отложено {skipped}" if skipped else ""))
+        msg_parts = []
+        if deleted:
+            msg_parts.append(f"удалено {deleted}")
+        if failed:
+            msg_parts.append(f"не удалось {failed}")
+        if skipped:
+            msg_parts.append(f"отложено {skipped} (лимит WB)")
 
-    return {"processed": len(to_delete), "deleted": deleted, "failed": failed, "skipped": skipped}
+        message = f"Очистка корзины WB: {', '.join(msg_parts)}"
+        _log(db, action="wb_trash", ok=(failed == 0), message=message)
+
+    return {"processed": processed, "deleted": deleted, "failed": failed, "skipped": skipped}

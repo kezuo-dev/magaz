@@ -158,14 +158,19 @@ def cleanup_wb_trash() -> None:
         # каждые 10 минут забивается одинаковым «нечего удалять».
         result = move_withdrawn_to_trash(db, limit=None, verbose=False)
         db.commit()
-        processed = result.get("processed", 0)
         deleted = result.get("deleted", 0)
         failed = result.get("failed", 0)
-        if processed:
-            logger.info(
-                "Очистка корзины WB: обработано %s, удалено %s, не удалось %s",
-                processed, deleted, failed
-            )
+        skipped = result.get("skipped", 0)
+        # Логируем только если что-то произошло
+        if deleted or failed or skipped:
+            parts = []
+            if deleted:
+                parts.append(f"удалено {deleted}")
+            if failed:
+                parts.append(f"не удалось {failed}")
+            if skipped:
+                parts.append(f"отложено {skipped}")
+            logger.info("Очистка корзины WB: %s", ", ".join(parts))
     except Exception:  # noqa: BLE001 — сбой очистки не должен ронять планировщик
         db.rollback()
         logger.exception("Сбой очистки корзины WB")
