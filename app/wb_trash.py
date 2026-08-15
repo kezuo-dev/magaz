@@ -104,9 +104,13 @@ def move_withdrawn_to_trash(
         .options(selectinload(Book.listings))
         .where(
             Book.status.in_([BookStatus.SOLD, BookStatus.WITHDRAWN]),
+            # Берём только книги с числовым nmID — без него API корзины не работает.
+            # Книги с vendorCode (старые, до миграции nmID) в очередь не попадают:
+            # иначе они вечно занимают первые 100 мест и блокируют все остальные.
             Book.listings.any(
                 (Listing.marketplace == "wildberries")
                 & (Listing.status != ListingStatus.TRASHED)
+                & Listing.external_id.regexp_match(r"^\d+$")
             ),
         )
         .order_by(Book.updated_at.asc())  # FIFO: старые книги первыми
