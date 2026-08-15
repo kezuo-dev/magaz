@@ -199,9 +199,9 @@ def move_withdrawn_to_trash(
             )
             for book, listing, nm in batch:
                 deleted += 1
-                if verbose:
-                    _log(db, action="wb_trash", ok=True, book_id=book.id,
-                         message=f"Карточка {nm} ({book.sku}) удалена в корзину WB")
+                # ВАЖНО: всегда логируем удалённые карточки, чтобы можно было проверить
+                _log(db, action="wb_trash", ok=True, book_id=book.id,
+                     message=f"Карточка {nm} ({book.sku}) удалена в корзину WB")
         except MarketplaceError as exc:
             err = str(exc)
             # 429 — лимит. Останавливаемся, не множим запросы.
