@@ -100,6 +100,28 @@ def ensure_schema() -> None:
         with engine.begin() as conn:
             conn.execute(text("UPDATE books SET status = 'in_stock' WHERE status = 'draft'"))
 
+    # Помечаем лоты WB, которые были успешно удалены в корзину до появления
+    # статуса TRASHED. Без этого те же карточки снова попадают в очередь,
+    # вызывают лишние запросы к API и получают 429.
+    # Критерий: есть запись в sync_log с action='wb_trash', ok=1 (SQLite хранит
+    # bool как integer; ok=1 совместимо и с PostgreSQL) и текстом
+    # "удалена в корзину WB" для данной книги — значит, API подтвердил удаление.
+    if "listings" in tables and "sync_log" in tables:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE listings
+                SET status = 'trashed'
+                WHERE marketplace = 'wildberries'
+                  AND status != 'trashed'
+                  AND book_id IN (
+                      SELECT DISTINCT book_id FROM sync_log
+                      WHERE action = 'wb_trash'
+                        AND ok = 1
+                        AND message LIKE '%удалена в корзину WB%'
+                        AND book_id IS NOT NULL
+                  )
+            """))
+
     # Индексы, добавленные после создания таблиц: create_all() их не досоздаёт.
     # Каталог сортируется по books.updated_at DESC — без индекса на 50k книгах
     # каждая страница вызывает полную сортировку таблицы.

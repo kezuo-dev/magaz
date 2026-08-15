@@ -48,6 +48,7 @@ class ListingStatus(str, Enum):
     ACTIVE = "active"          # опубликовано и активно
     WITHDRAWING = "withdrawing"  # снятие отправлено, ждём подтверждения
     WITHDRAWN = "withdrawn"    # снято
+    TRASHED = "trashed"        # карточка отправлена в корзину WB (API подтвердил)
     ERROR = "error"            # ошибка синхронизации, см. sync_log
 
 

@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.marketplaces import MarketplaceError, get_client
-from app.models import Book, BookStatus, Listing, MarketplaceAccount, Order, SyncLog, utcnow
+from app.models import Book, BookStatus, Listing, ListingStatus, MarketplaceAccount, Order, SyncLog, utcnow
 from app.security import decrypt_credentials
 
 
@@ -104,7 +104,10 @@ def move_withdrawn_to_trash(
         .options(selectinload(Book.listings))
         .where(
             Book.status.in_([BookStatus.SOLD, BookStatus.WITHDRAWN]),
-            Book.listings.any(Listing.marketplace == "wildberries"),
+            Book.listings.any(
+                (Listing.marketplace == "wildberries")
+                & (Listing.status != ListingStatus.TRASHED)
+            ),
         )
         .order_by(Book.updated_at.asc())  # FIFO: старые книги первыми
         .limit(max_books)
@@ -199,6 +202,7 @@ def move_withdrawn_to_trash(
             )
             for book, listing, nm in batch:
                 deleted += 1
+                listing.status = ListingStatus.TRASHED  # не трогать повторно
                 # ВАЖНО: всегда логируем удалённые карточки, чтобы можно было проверить
                 _log(db, action="wb_trash", ok=True, book_id=book.id,
                      message=f"Карточка {nm} ({book.sku}) удалена в корзину WB")
