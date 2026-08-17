@@ -427,7 +427,9 @@ def wb_trash(db: Session = Depends(get_db), days: int = Form(7)):
     failed = result.get("failed", 0)
     blocked = result.get("blocked", 0)
 
-    if not processed:
+    if result.get("waiting"):
+        message = "Очистка корзины WB подождана: WB недавно отдал лимит (429), попробуйте чуть позже"
+    elif not processed:
         message = "Очистка корзины WB: снятых книг для удаления нет"
     else:
         message = f"WB: удалено в корзину {deleted} из {processed}"

@@ -144,18 +144,23 @@ def reconcile_all_withdrawn() -> None:
 
 
 def cleanup_wb_trash() -> None:
-    """Удалить снятые книги в корзину WB (каждые 10 минут).
+    """Удалить снятые книги в корзину WB (каждый час).
 
     Обрабатывает до MAX_BOOKS_PER_RUN книг (100) за проход, старые первыми (FIFO).
     Не зависает на больших backlog'ах — берёт порцию, остальное в следующий раз.
     Пачки по 10 карточек, пауза 5 секунд — баланс скорости и лимитов WB.
+
+    Час вместо 10 минут: WB жёстко лимитирует endpoint delete/trash (429 почти
+    на каждый вызов). Частый запуск не ускоряет очистку — лишь жжёт квоту впустую.
+    Внутри — своё окно тишины после 429 (20 минут), так что даже при часовом
+    цикле прогон делает запросы только когда WB готов их принять.
     """
     db = SessionLocal()
     try:
         if not is_sync_enabled(db):
             return
         # verbose=False: автозапуск молчит, когда удалять нечего, иначе журнал
-        # каждые 10 минут забивается одинаковым «нечего удалять».
+        # каждый час забивается одинаковым «нечего удалять».
         result = move_withdrawn_to_trash(db, limit=None, verbose=False)
         deleted = result.get("deleted", 0)
         failed = result.get("failed", 0)
@@ -236,7 +241,7 @@ def start_scheduler() -> None:
     _scheduler.add_job(
         cleanup_wb_trash,
         trigger="interval",
-        minutes=10,
+        minutes=60,
         id="wb_trash_cleanup",
         max_instances=1,
         coalesce=True,
@@ -244,7 +249,7 @@ def start_scheduler() -> None:
     _scheduler.start()
     logger.info(
         "Планировщик запущен: заказы %s мин, остатки %s мин, сверка каталога %s мин, "
-        "сверка снятых 10 мин, очистка корзины WB 10 мин",
+        "сверка снятых 10 мин, очистка корзины WB 60 мин",
         settings.poll_interval_minutes,
         settings.stock_watch_interval_minutes,
         settings.catalog_sync_interval_minutes,

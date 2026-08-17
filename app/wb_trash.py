@@ -8,8 +8,11 @@
 - Лимит за проход (MAX_BOOKS_PER_RUN) — не блокируем scheduler надолго
 - Пачки по BATCH_SIZE карточек — баланс между скоростью и лимитами
 - Пауза PAUSE_SECONDS между пачками — даём API WB остыть
-- При 429: одна повторная попытка после паузы, затем пачка разбирается по одной
-  (каждая со своей паузой) — очередь движется даже под лимитом, ничего не бросаем
+- При 429: немедленная остановка прогона + окно тишины RETRY_AFTER_429_MIN.
+  WB отдаёт 429 на КАЖДЫЙ вызов этого endpoint (даже одиночный) и держит лимит
+  десятки минут — молотить в это время бесполезно. После 429 прогон выходит
+  сразу, не тратя запросов, пока не пройдёт окно; тогда пробуем одну пачку,
+  и если снова 429 — окно продлевается.
 - При жёсткой ошибке пачки (400 и т.п.) — ИЗОЛЯЦИЯ: WB отклоняет всю пачку из-за
   одной битой карточки (уже в корзине / карточки нет / нет прав). Пробуем каждую
   по одной: хорошие удаляются, а битые после MAX_TRASH_FAILURES неудач помечаются
@@ -22,12 +25,22 @@
 from __future__ import annotations
 
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.marketplaces import MarketplaceError, get_client
-from app.models import Book, BookStatus, Listing, ListingStatus, MarketplaceAccount, Order, SyncLog, utcnow
+from app.models import (
+    AppSetting,
+    Book,
+    BookStatus,
+    Listing,
+    ListingStatus,
+    MarketplaceAccount,
+    Order,
+    SyncLog,
+    utcnow,
+)
 from app.security import decrypt_credentials
 
 
@@ -59,11 +72,53 @@ BATCH_SIZE = 10
 # приносил удалений. Пять секунд — медленнее, но стабильно.
 PAUSE_SECONDS = 5
 
+# Окно тишины после лимита. WB отдаёт 429 на delete/trash на КАЖДЫЙ вызов,
+# даже одиночный, и держит лимит десятки минут: молотить пачки/одиночки,
+# пока идёт троттлинг, бесполезно — жжём квоту и провоцируем ещё более
+# жёсткий лимит. Поэтому после 429 запоминаем время и следующие
+# RETRY_AFTER_429_MIN минут прогон выходит сразу, не делая ни одного запроса.
+# Когда окно вышло — пробуем одну пачку, и если снова 429, окно продлевается.
+# Так очередь (тысячи карточек) двигается по 1-2 пачки, когда WB отпускает,
+# и ни один запрос не тратится впустую во время троттлинга.
+RETRY_AFTER_429_MIN = 20
+
+# Ключ в app_settings, где хранится момент последнего 429 от WB.
+LAST_429_KEY = "wb_trash_last_429"
+
 # Сколько неудачных попыток переживает карточка, прежде чем будет признана
 # «битой» и выведена из очереди. Если карточка не удаляется 3 раза подряд
 # (обычно: уже в корзине / удалена с WB), шансов, что она удалится сама,
 # нет — вечное повторение лишь жжёт лимит и блокирует очередь позади неё.
 MAX_TRASH_FAILURES = 3
+
+
+def _get_last_429(db: Session) -> datetime | None:
+    """Когда был последний 429 от WB (из app_settings, ISO-строка).
+
+    None — 429 ещё не было (или ключ стёрли) — прогон не ограничиваем.
+    """
+    row = db.get(AppSetting, LAST_429_KEY)
+    if row is None or not row.value:
+        return None
+    try:
+        return datetime.fromisoformat(row.value)
+    except ValueError:
+        return None
+
+
+def _note_429(db: Session, now: datetime | None = None) -> None:
+    """Записать момент 429. Пишем обязательно: именно по нему решает окно тишины."""
+    row = db.get(AppSetting, LAST_429_KEY)
+    if row is None:
+        row = AppSetting(key=LAST_429_KEY)
+        db.add(row)
+    row.value = (now or utcnow()).isoformat()
+
+
+def _last_429_within(db: Session) -> bool:
+    """Внутри ли окна тишины после 429 (прогон выходит, не трогая WB)."""
+    last = _get_last_429(db)
+    return last is not None and utcnow() - last < timedelta(minutes=RETRY_AFTER_429_MIN)
 
 
 def _log(db: Session, *, action, ok, message, book_id=None) -> None:
@@ -120,6 +175,22 @@ def move_withdrawn_to_trash(
         _log(db, action="wb_trash", ok=False,
              message=f"Не удалось подключиться к WB: {exc}")
         return {"processed": 0, "deleted": 0, "failed": 0, "blocked": 0, "skipped": 0}
+
+    # Окно тишины после 429: WB лимитирует delete/trash так, что любой вызов
+    # в этом окне вернёт 429 (наблюдали часами даже одиночный запрос). Пока окно
+    # не вышло — выходим, не сделав ни одного запроса. Ручной запуск из UI
+    # тоже уважает окно: пользователь видит «очистка подождана», но кнопка всё
+    # равно работает, когда WB отпускает.
+    if _last_429_within(db):
+        remaining = int(
+            (RETRY_AFTER_429_MIN * 60)
+            - (utcnow() - _get_last_429(db)).total_seconds()
+        )
+        _log(db, action="wb_trash", ok=True,
+             message=f"Очистка корзины WB подождана: WB недавно отдал лимит (429), "
+                     f"следующая попытка через ~{max(remaining, 0) // 60} мин")
+        return {"processed": 0, "deleted": 0, "failed": 0, "blocked": 0, "skipped": 0,
+                "waiting": True}
 
     # Находим снятые книги с лотом WB. КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: сортируем по
     # updated_at ASC (старые первыми) и берём limit — это FIFO-очередь, которая
@@ -342,10 +413,12 @@ def move_withdrawn_to_trash(
                 # даже одиночный вызов упорно отдаёт 429. Ранняя попытка «долбить»
                 # до ответа (ретраи пачки → по одной → снова паузы) лишь городила
                 # десятки запросов за прогон и провоцировала ЕЩЁ более жёсткий
-                # троттлинг. Правильно — уважать лимит: остановить прогон сразу,
-                # остаток очереди заберёт следующий цикл через 10 минут. Так было
-                # в исходной логике («остановились, отложено N»), и она давала
-                # стабильные 1–4 удаления за прогон.
+                # троттлинг. Правильно — уважать лимит: остановить прогон сразу.
+                # Момент 429 запоминаем (окно тишины): следующие RETRY_AFTER_429_MIN
+                # минут прогон будет выходить без единого запроса к WB, затем
+                # попробует одну пачку. Пока лимит не отпустит — так и будет:
+                # одна пачка за прогон, остальное заберёт следующий цикл.
+                _note_429(db)
                 skipped = len(to_delete) - i
                 _log(db, action="wb_trash", ok=True,
                      message=f"Лимит WB при удалении в корзину: остановились, "
@@ -372,7 +445,6 @@ def move_withdrawn_to_trash(
                        "bad_nm_ids": [n for _, _, n in batch if n not in ok_ids],
                        "detail": err}
 
-        skip_ids = set(res.get("skip_nm_ids") or [])
         for book, listing, nm in batch:
             if nm in res["ok_nm_ids"]:
                 deleted += 1
@@ -381,10 +453,6 @@ def move_withdrawn_to_trash(
                 listing.trash_failures = 0
                 listing.last_error = None
                 listing.last_synced_at = utcnow()
-            elif nm in skip_ids:
-                # Лимит не отпустил — карточка не виновата, просто откладываем.
-                # Не увеличиваем trash_failures: это не неудача карточки.
-                skipped += 1
             else:
                 # Не подтверждено удаление — неудача. Какая именно, скажет
                 # _mark_trash_failure: временный сбой (ретрай позже) или битая
