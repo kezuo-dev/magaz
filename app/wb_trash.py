@@ -338,42 +338,19 @@ def move_withdrawn_to_trash(
             # разбираем по одной с паузой (не бросаем очередь!). Одиночная карточка
             # при лимите — откладываем, не считая виноватой.
             if "429" in err or "лимит" in err.lower():
-                time.sleep(PAUSE_SECONDS)
-                if len(batch) > 1:
-                    try:
-                        res = _do_delete([nm for _, _, nm in batch])
-                    except MarketplaceError:
-                        # Лимит не отпустил: обрабатываем пачку по одной с паузой.
-                        # Карточка, снова упёршаяся в лимит, не виновата — её
-                        # откладываем (skip_nm_ids), а не считаем неудачей:
-                        # иначе за несколько прогонов под постоянным лимитом
-                        # невинная карточка набрала бы 3 «неудачи» и была бы
-                        # заблокирована навсегда.
-                        single_ok = []
-                        single_skip: list[int] = []
-                        for book, listing, nm in batch:
-                            time.sleep(PAUSE_SECONDS)
-                            try:
-                                res_single = _do_delete([nm])
-                                if nm not in res_single["bad_nm_ids"]:
-                                    single_ok.append((book, listing, nm))
-                            except MarketplaceError:
-                                single_skip.append(nm)
-                        ok_ids = {n for _, _, n in single_ok}
-                        skip_ids = set(single_skip)
-                        res = {"ok_nm_ids": [n for _, _, n in single_ok],
-                               "bad_nm_ids": [n for _, _, n in batch
-                                              if n not in ok_ids and n not in skip_ids],
-                               "skip_nm_ids": sorted(skip_ids),
-                               "detail": err}
-                else:
-                    # Одиночная карточка упирается в лимит — откладываем.
-                    # Не continue: он в while-цикле пропустил бы сдвиг i, и та же
-                    # карточка крутилась бы вечно в одном прогоне, повесив задачу.
-                    res = {"ok_nm_ids": [],
-                           "bad_nm_ids": [],
-                           "skip_nm_ids": [nm for _, _, nm in batch],
-                           "detail": err}
+                # Лимит WB на endpoint delete/trash. Часы наблюдений показали:
+                # даже одиночный вызов упорно отдаёт 429. Ранняя попытка «долбить»
+                # до ответа (ретраи пачки → по одной → снова паузы) лишь городила
+                # десятки запросов за прогон и провоцировала ЕЩЁ более жёсткий
+                # троттлинг. Правильно — уважать лимит: остановить прогон сразу,
+                # остаток очереди заберёт следующий цикл через 10 минут. Так было
+                # в исходной логике («остановились, отложено N»), и она давала
+                # стабильные 1–4 удаления за прогон.
+                skipped = len(to_delete) - i
+                _log(db, action="wb_trash", ok=True,
+                     message=f"Лимит WB при удалении в корзину: остановились, "
+                             f"отложено {skipped} карточек")
+                break
             else:
                 # Жёсткая ошибка пачки (400 и т.п.) — почти всегда одна битая
                 # карточка среди пары десятков. Разбираем по одной: выясняем,

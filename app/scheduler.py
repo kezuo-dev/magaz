@@ -157,16 +157,18 @@ def cleanup_wb_trash() -> None:
         # verbose=False: автозапуск молчит, когда удалять нечего, иначе журнал
         # каждые 10 минут забивается одинаковым «нечего удалять».
         result = move_withdrawn_to_trash(db, limit=None, verbose=False)
-        db.commit()
         deleted = result.get("deleted", 0)
         failed = result.get("failed", 0)
         blocked = result.get("blocked", 0)
         skipped = result.get("skipped", 0)
+        # Логируем счётчики до commit: даже если commit упадёт (rollback сотрёт
+        # запись из журнала синхронизации), в логе контейнера останется факт
+        # прогона. Диагностика «почему корзина молчит» опирается на это.
         logger.info(
-            "Очистка корзины WB (verbose=False): processed=%s deleted=%s failed=%s "
-            "blocked=%s skipped=%s",
+            "Очистка корзины WB: processed=%s deleted=%s failed=%s blocked=%s skipped=%s",
             result.get("processed", 0), deleted, failed, blocked, skipped,
         )
+        db.commit()
         # Логируем только если что-то произошло
         if deleted or failed or blocked or skipped:
             parts = []
