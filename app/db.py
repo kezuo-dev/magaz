@@ -109,34 +109,51 @@ def ensure_schema() -> None:
     # Помечаем лоты WB, которые были успешно удалены в корзину до появления
     # статуса TRASHED. Без этого те же карточки снова попадают в очередь,
     # вызывают лишние запросы к API и получают 429.
-    # Критерий: есть запись в sync_log с action='wb_trash', ok=TRUE и текстом
-    # "удалена в корзину WB" для данной книги — значит, API подтвердил удаление.
-    # С 2026-08 итоговые записи wb_trash больше не ссылаются на book_id (список
-    # SKU одной строкой), поэтому дополнительно сопоставляем по SKU из message:
-    # если в записи упоминается SKU книги, её лот удалён.
+    #
+    # ДВА ПРОХОДА (не один UPDATE с коррелированным подзапросом):
+    # 1. По book_id: старые записи wb_trash ссылались на книгу напрямую.
+    # 2. По SKU из message: с 2026-08 итоговые записи перечисляют SKU одной
+    #    строкой «... | Удалены: SKU1 (nmID), SKU2 (nmID), ...».
+    #
+    # ВАЖНО ПРО СКОРОСТЬ: прежняя версия (коррелированный EXISTS с JOIN и
+    # LIKE по message на КАЖДУЮ строку listings) на проде с сотнями тысяч записей
+    # sync_log выполнялась минутами/часами и вешала старт приложения (белый
+    # экран). Поэтому первый проход делает ОДИН проход по sync_log без JOIN с
+    # listings (только DISTINCT book_id), а второй — один JOIN и одну сверку,
+    # без повторных LIKE на каждую строку listings.
     if "listings" in tables and "sync_log" in tables and "books" in tables:
         with engine.begin() as conn:
+            # Проход 1: лоты, чьи книги прямо указаны в старых записях wb_trash.
             conn.execute(text("""
                 UPDATE listings
                 SET status = 'trashed'
                 WHERE marketplace = 'wildberries'
                   AND status != 'trashed'
-                  AND (
-                      book_id IN (
-                          SELECT DISTINCT book_id FROM sync_log
-                          WHERE action = 'wb_trash'
-                            AND ok = TRUE
-                            AND message LIKE '%удалена в корзину WB%'
-                            AND book_id IS NOT NULL
-                      )
-                      OR EXISTS (
-                          SELECT 1 FROM sync_log l
-                          JOIN books b ON b.id = listings.book_id
-                          WHERE l.action = 'wb_trash'
-                            AND l.ok = TRUE
-                            AND l.message LIKE '%удалена в корзину WB%'
-                            AND l.message LIKE '%' || b.sku || '%'
-                      )
+                  AND book_id IN (
+                      SELECT DISTINCT book_id FROM sync_log
+                      WHERE action = 'wb_trash'
+                        AND ok = TRUE
+                        AND message LIKE '%удалена в корзину WB%'
+                        AND book_id IS NOT NULL
+                  )
+            """))
+            # Проход 2: книги, чей SKU упомянут в итоговых записях без book_id.
+            # Чтобы не гонять LIKE по всему журналу для каждой книги, сначала
+            # собираем пары (book_id, sku) по непустым ответам, потом удаляем.
+            conn.execute(text("""
+                UPDATE listings
+                SET status = 'trashed'
+                WHERE marketplace = 'wildberries'
+                  AND status != 'trashed'
+                  AND book_id IN (
+                      SELECT b.id
+                      FROM sync_log l
+                      JOIN books b ON b.sku IS NOT NULL AND b.sku != ''
+                      WHERE l.action = 'wb_trash'
+                        AND l.ok = TRUE
+                        AND l.message LIKE '%удалена в корзину WB%'
+                        AND l.book_id IS NULL
+                        AND l.message LIKE '%' || b.sku || '%'
                   )
             """))
 
