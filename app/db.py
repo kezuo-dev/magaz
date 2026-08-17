@@ -84,6 +84,11 @@ def ensure_schema() -> None:
             "removed_from_sale": (
                 "ALTER TABLE listings ADD COLUMN removed_from_sale BOOLEAN NOT NULL DEFAULT FALSE"
             ),
+            # Счётчик неудачных попыток корзины WB и флаг «битой» карточки.
+            "trash_failures": "ALTER TABLE listings ADD COLUMN trash_failures INTEGER DEFAULT 0",
+            "trash_blocked": (
+                "ALTER TABLE listings ADD COLUMN trash_blocked BOOLEAN NOT NULL DEFAULT FALSE"
+            ),
         }
         with engine.begin() as conn:
             for column, ddl in listing_additions.items():

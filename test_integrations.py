@@ -6,6 +6,7 @@
 отслеживает каталог и снимает проданное.
 """
 import os
+from datetime import datetime
 
 # Фоновый планировщик в тестах не нужен — отключаем до импорта приложения.
 os.environ["SCHEDULER_ENABLED"] = "false"
@@ -126,6 +127,14 @@ _wb_stock_writes = []
 _fake_wb_cancelled = {"orders": []}
 _wb_trash_deletes = []
 _wb_trash_recovers = []
+# «Битые» nmID: их карточки WB не даёт удалить (уже в корзине / карточки нет).
+# Заполняем в тесте изоляции: пачка с такой карточкой падает целиком 400-й,
+# одиночная — 200 с ошибкой в теле.
+_wb_trash_bad_ns = set()
+# Битые карточки, у которых WB не называет виновника в теле (только текст
+# ошибки). Проверяем консервативную обработку: карточка не должна считаться
+# удалённой.
+_wb_trash_bad_unnamed = set()
 
 
 def fake_request(method, url, json=None, data=None, params=None, headers=None, timeout=None):
@@ -148,8 +157,25 @@ def fake_request(method, url, json=None, data=None, params=None, headers=None, t
     if url.endswith("/content/v2/cards/delete/trash"):
         # Удаление карточек в корзину WB. Запоминаем nmID, чтобы проверить,
         # какие книги реально ушли в корзину.
-        for nm in (json or {}).get("nmIDs") or []:
+        ns = (json or {}).get("nmIDs") or []
+        for nm in ns:
             _wb_trash_deletes.append(nm)
+        # Имитация поведения WB: пачка с хоть одной «битой» карточкой падает
+        # ЦЕЛИКОМ 400-й (errorText), одиночная битая — 200 с ошибкой в теле
+        # (errors). Именно так выглядит API в жизни, и именно это ломало
+        # очередь корзины до изоляции карточек.
+        if any(nm in _wb_trash_bad_ns for nm in ns):
+            if len(ns) > 1:
+                return FakeResponse(
+                    400,
+                    {},
+                    text="Wildberries: одна из карточек уже в корзине (nmID ...)",
+                )
+            # Одиночная битая: WB может вернуть и 200 с виновником в теле,
+            # и 200 с ошибкой, где виновника НЕТ. Проверяем оба варианта.
+            if ns[0] in _wb_trash_bad_unnamed:
+                return FakeResponse(200, {"errorText": "Не удалось удалить карточку"})
+            return FakeResponse(200, {"errors": {str(ns[0]): "Карточка уже в корзине"}})
         return FakeResponse(200, {})
     if url.endswith("/content/v2/cards/recover"):
         # Восстановление карточек из корзины WB (при отмене заказа).
@@ -1023,6 +1049,125 @@ with SessionLocal() as s:
 assert listing_status_label("trashed") == "В корзине WB", "нет человеческой метки TRASHED"
 
 print("[ok] TRASHED терминальный: ни сверка, ни кросс-снятие, ни wb_trash не воскрешают лот")
+
+# Чистим данные под следующий блок.
+with SessionLocal() as s:
+    s.query(Order).delete(); s.query(Listing).delete(); s.query(Book).delete(); s.commit()
+
+
+# --- 17c. Изоляция битых карточек: одна плохая не блокирует очередь ---------
+# Сценарий: у книги в очереди корзины WB карточка «битая» (WB не даёт удалить:
+# уже в корзине / карточки нет). WB отклоняет всю пачку 400-й. До изоляции вся
+# пачка помечалась неудачей и очередь застревала навсегда: каждый запуск одно и
+# то же «не удалось 30» («то удаляются, то не удаляются»). Теперь:
+#   1. Пачка падает — разбираем её по одной, хорошие удаляются.
+#   2. Битая копит trash_failures, после MAX_TRASH_FAILURES получает
+#      trash_blocked и НАВСЕГДА выходит из очереди.
+#   3. Это защищает очередь: битая в начале FIFO больше не блокирует остальных.
+
+# Книги с одинаковым updated_at — сортируем по SKU, чтобы порядок был
+# детерминированным и битая гарантированно попала в первую пачку.
+def _mk_trash_book(s, sku, nm_id):
+    b = Book(sku=sku, title="Изоляция", status=BookStatus.WITHDRAWN, price=100,
+             updated_at=datetime(2026, 1, 1, 12, 0, 0))
+    s.add(b); s.flush()
+    s.add(Listing(book_id=b.id, marketplace="wildberries", external_id=str(nm_id),
+                  stock_key=f"bc-{nm_id}", status=ListingStatus.WITHDRAWN))
+    return b.id
+
+with SessionLocal() as s:
+    bad1 = _mk_trash_book(s, "ISO-BAD-1", 910101)   # битая (внутри пачки)
+    good3 = _mk_trash_book(s, "ISO-GOOD-1", 920001)  # хорошая — должна удалиться
+    good4 = _mk_trash_book(s, "ISO-GOOD-2", 920002)  # хорошая — должна удалиться
+    s.commit()
+
+# --- Фаза 1: одна битая в пачке. Пачка падает целиком 400-й, изоляция
+# разбирает по одной: две хорошие удаляются, битая получает 1-ю неудачу.
+
+_wb_trash_bad_ns = {910101}
+_wb_trash_deletes.clear()
+with SessionLocal() as s:
+    res = move_withdrawn_to_trash(s, limit=100)
+    s.commit()
+    assert res["deleted"] == 2, f"хорошие не удалились после изоляции: {res}"
+    assert res["blocked"] == 0, f"битая заблокирована с первой попытки: {res}"
+    assert res["failed"] == 1, f"битая должна быть 1 в failed: {res}"
+    assert 920001 in _wb_trash_deletes and 920002 in _wb_trash_deletes, \
+        "хорошие должны уйти в DELETE"
+with SessionLocal() as s:
+    st1 = s.query(Listing).filter_by(book_id=good3).one()
+    st2 = s.query(Listing).filter_by(book_id=good4).one()
+    assert st1.status == ListingStatus.TRASHED, f"хороший лот не TRASHED: {st1.status}"
+    assert st2.status == ListingStatus.TRASHED, f"хороший лот не TRASHED: {st2.status}"
+    bad = s.query(Listing).filter_by(book_id=bad1).one()
+    assert bad.status == ListingStatus.WITHDRAWN, "битый лот внезапно TRASHED"
+    assert bad.trash_failures == 1 and not bad.trash_blocked, \
+        "битая не учла первую неудачу"
+
+# --- Фаза 2: битая копит неудачи, после MAX_TRASH_FAILURES блокируется.
+# Очередь теперь — только bad1. Запуск 2: 3-я неудача → блокировка.
+
+_wb_trash_deletes.clear()
+with SessionLocal() as s:
+    res = move_withdrawn_to_trash(s, limit=100)
+    s.commit()
+    assert res["blocked"] == 0 and res["failed"] == 1, \
+        f"2-я неудача битой: {res}"
+    assert res["deleted"] == 0, "удалять было нечего"
+_wb_trash_deletes.clear()
+with SessionLocal() as s:
+    res = move_withdrawn_to_trash(s, limit=100)
+    s.commit()
+    assert res["blocked"] == 1 and res["failed"] == 0, \
+        f"3-я неудача должна заблокировать: {res}"
+    assert res["processed"] == 1, f"processed без двойного учёта: {res}"
+with SessionLocal() as s:
+    b1 = s.query(Listing).filter_by(book_id=bad1).one()
+    assert b1.trash_blocked and b1.trash_failures == 3, "bad1 не заблокирована"
+
+# --- Фаза 3: очередь пуста — битая больше не подбирается.
+
+_wb_trash_deletes.clear()
+with SessionLocal() as s:
+    res = move_withdrawn_to_trash(s, limit=100)
+    s.commit()
+    assert res["processed"] == 0, f"очередь не пуста после блокировки: {res}"
+    assert 910101 not in _wb_trash_deletes, "битая снова попала в DELETE"
+
+# --- Фаза 4: безымянная ошибка в теле (errorText без nmID). WB не называет
+# виновника — карточка НЕ должна считаться удалённой (консервативно), иначе
+# она получила бы ложный статус TRASHED и больше никогда не удалилась.
+
+with SessionLocal() as s:
+    un6 = _mk_trash_book(s, "ISO-UNNAMED-2", 940001)
+    s.commit()
+_wb_trash_bad_ns = {940001}
+_wb_trash_bad_unnamed = {940001}
+_wb_trash_deletes.clear()
+# Запуск 1: пачка из одной битой — в теле ошибка без виновника.
+with SessionLocal() as s:
+    res = move_withdrawn_to_trash(s, limit=100)
+    s.commit()
+    assert res["deleted"] == 0, f"безымянная ошибка не должна удалить: {res}"
+    assert res["failed"] == 1, f"безымянная ошибка: {res}"
+    assert res["blocked"] == 0, "blocked с первой попытки быть не должно"
+with SessionLocal() as s:
+    un = s.query(Listing).filter_by(book_id=un6).one()
+    assert un.status == ListingStatus.WITHDRAWN, "лот с безымянной ошибкой стал TRASHED"
+    assert un.trash_failures == 1, f"не учтена безымянная ошибка: {un.trash_failures}"
+# Запуски 2-3: блокируется.
+for _ in range(2):
+    with SessionLocal() as s:
+        res = move_withdrawn_to_trash(s, limit=100)
+        s.commit()
+with SessionLocal() as s:
+    un = s.query(Listing).filter_by(book_id=un6).one()
+    assert un.trash_blocked, "безымянная битая не заблокировалась после 3 неудач"
+
+_wb_trash_bad_ns = set()
+_wb_trash_bad_unnamed = set()
+_wb_trash_deletes.clear()
+print("[ok] изоляция: битые блокируются и не блокируют очередь")
 
 # Чистим данные под следующий блок.
 with SessionLocal() as s:

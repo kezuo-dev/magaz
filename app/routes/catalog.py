@@ -425,6 +425,7 @@ def wb_trash(db: Session = Depends(get_db), days: int = Form(7)):
     processed = result.get("processed", 0)
     deleted = result.get("deleted", 0)
     failed = result.get("failed", 0)
+    blocked = result.get("blocked", 0)
 
     if not processed:
         message = "Очистка корзины WB: снятых книг для удаления нет"
@@ -434,6 +435,8 @@ def wb_trash(db: Session = Depends(get_db), days: int = Form(7)):
             message += f", отложено {result['skipped']} (лимит WB — продолжим автоматически)"
         if failed:
             message += f", не удалось {failed}"
+        if blocked:
+            message += f", битых заблокировано {blocked}"
 
     from urllib.parse import quote
     return RedirectResponse("/?synced=" + quote(message), status_code=303)

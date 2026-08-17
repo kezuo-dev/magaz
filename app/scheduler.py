@@ -160,14 +160,17 @@ def cleanup_wb_trash() -> None:
         db.commit()
         deleted = result.get("deleted", 0)
         failed = result.get("failed", 0)
+        blocked = result.get("blocked", 0)
         skipped = result.get("skipped", 0)
         # Логируем только если что-то произошло
-        if deleted or failed or skipped:
+        if deleted or failed or blocked or skipped:
             parts = []
             if deleted:
                 parts.append(f"удалено {deleted}")
             if failed:
                 parts.append(f"не удалось {failed}")
+            if blocked:
+                parts.append(f"заблокировано {blocked}")
             if skipped:
                 parts.append(f"отложено {skipped}")
             logger.info("Очистка корзины WB: %s", ", ".join(parts))

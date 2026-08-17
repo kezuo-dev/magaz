@@ -146,6 +146,14 @@ class Listing(Base):
     removed_from_sale: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
+    # Счётчик неудачных попыток удаления в корзину WB. Нужен, чтобы отличать
+    # временный сбой (1-2 раза) от «битой» карточки (уже в корзине / удалена
+    # с WB): после MAX_TRASH_FAILURES попыток карточка блокируется и выходит из
+    # очереди, иначе она вечно висела в начале FIFO и блокировала все остальные.
+    trash_failures: Mapped[int] = mapped_column(Integer, default=0)
+    # True — карточка окончательно не удаляется (превышен лимит попыток).
+    # Такие лоты пропускаются очередью корзины навсегда.
+    trash_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     book: Mapped["Book"] = relationship(back_populates="listings")
 
