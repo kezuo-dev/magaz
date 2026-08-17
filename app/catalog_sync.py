@@ -108,6 +108,14 @@ def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing)
     """
     from app.flags import is_auto_withdraw_enabled  # локальный импорт против цикла
 
+    if listing.status == ListingStatus.TRASHED:
+        # Карточка уже удалена в корзину WB — TRASHED терминальный статус.
+        # Не переводим её в WITHDRAWN: иначе сверка вернула бы карточку в очередь
+        # корзины и каждый час повторно удаляла одну и ту же (лишние запросы → 429).
+        # Только пересчитываем статус книги — лот остаётся как есть.
+        refresh_book_status(db, book)
+        return
+
     listing.status = ListingStatus.WITHDRAWN
     listing.last_synced_at = utcnow()
 
@@ -362,14 +370,14 @@ def _force_remove_from_sale(
         listing.last_error = None
         _log(db, marketplace=marketplace, action="withdraw", ok=True, book_id=book.id,
              message=(
-                 f"Карточка {book.sku} на {marketplace} принудительно удалена: "
+                 f"Карточка {book.sku} на {marketplace} принудительно снята: "
                  f"заказ был отменён после отгрузки, возврат не возвращается на этот артикул"
              ))
     except MarketplaceError as exc:
         listing.last_error = str(exc)
         _log(db, marketplace=marketplace, action="withdraw", ok=False, book_id=book.id,
              message=(
-                 f"Не удалось принудительно удалить карточку {book.sku} на {marketplace}: {exc}"
+                 f"Не удалось принудительно снять карточку {book.sku} на {marketplace}: {exc}"
              ))
 
 
@@ -390,6 +398,10 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
         .where(
             Listing.marketplace == marketplace,
             Listing.status != ListingStatus.WITHDRAWN,
+            # TRASHED — терминальный статус (карточка удалена в корзину WB).
+            # Такие лоты не сканируем: карточки нет в выгрузке, и сверка
+            # «воскрешала» бы их каждый час в WITHDRAWN → повторная очередь.
+            Listing.status != ListingStatus.TRASHED,
         )
     ).all()
 
@@ -535,7 +547,12 @@ def _sync_all_locked(db: Session) -> dict:
 
 
 def _active_listings(db: Session, marketplace: str) -> list[Listing]:
-    """Активные лоты площадки с подгруженной книгой и её остальными лотами."""
+    """Активные лоты площадки с подгруженной книгой и её остальными лотами.
+
+    TRASHED явно исключаем: карточка в корзине WB, и по ней никогда не должно
+    идти слежение за остатками (её ключа в ответе площадки нет, и watch_stocks
+    считал бы её «пропавшей»).
+    """
     return db.scalars(
         select(Listing)
         .options(selectinload(Listing.book).selectinload(Book.listings))

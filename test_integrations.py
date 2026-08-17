@@ -29,6 +29,7 @@ import app.marketplaces.wildberries as wb
 
 from app.models import UserRole
 from test_helpers import login
+from app.templating import listing_status_label
 
 # Вход теперь по телефону и паролю, отдельного пароля на разделы нет: что открыто,
 # решает роль (см. app/models.py ROLE_SECTIONS / ROLE_ACTIONS). Основной клиент —
@@ -936,6 +937,96 @@ print("[ok] защита от возврата отменённой отгруж
 _fake_ozon_list = {"items": [], "last_id": ""}
 _fake_ozon_info = {"items": []}
 _fake_ozon_stocks = {"items": []}
+
+
+# --- 17b. TRASHED — терминальный статус: корзина WB не воскрешает лот ---------
+# Сценарий: карточка удалена в корзину WB (status=TRASHED). Полная сверка каталога
+# видит, что карточки в выгрузке нет, и раньше «переводила» лот обратно в WITHDRAWN
+# каждый час — из-за чего wb_trash снова отправлял ту же карточку в корзину и сжигал
+# лимит API (429). Теперь TRASHED исключён из сверки: лот остаётся как есть.
+from app.wb_trash import move_withdrawn_to_trash
+from app.catalog_sync import _cross_withdraw, reconcile_disappeared, upsert_catalog_rows
+
+with SessionLocal() as s:
+    b = Book(sku="TRASHED-1", title="В корзине", status=BookStatus.WITHDRAWN, price=100)
+    s.add(b); s.flush()
+    # Лот уже в корзине WB (API подтвердил удаление).
+    s.add(Listing(book_id=b.id, marketplace="wildberries", external_id="999001",
+                  stock_key="bc-999001", status=ListingStatus.TRASHED))
+    s.commit()
+    trashed_id = b.id
+
+# 1. _cross_withdraw не должен понижать TRASHED → WITHDRAWN.
+with SessionLocal() as s:
+    b = s.get(Book, trashed_id)
+    listing = next(l for l in b.listings if l.marketplace == "wildberries")
+    _cross_withdraw(s, b, "wildberries", listing)
+    s.commit()
+with SessionLocal() as s:
+    listing = s.query(Listing).filter_by(book_id=trashed_id).one()
+    assert listing.status == ListingStatus.TRASHED, \
+        f"TRASHED понижен до {listing.status} (воскрешение корзины!)"
+
+# 2. reconcile_disappeared не сканирует TRASHED-лоты.
+with SessionLocal() as s:
+    b = s.get(Book, trashed_id)
+    listing = next(l for l in b.listings if l.marketplace == "wildberries")
+    listing.status = ListingStatus.TRASHED  # восстановим, если кто-то тронул
+    s.commit()
+with SessionLocal() as s:
+    # Карточки в выгрузке нет (live_skus пуст) — но TRASHED не должен попасть в scan.
+    removed = reconcile_disappeared(s, "wildberries", set())
+    s.commit()
+    assert removed == 0, f"reconcile_disappeared зацепил TRASHED: removed={removed}"
+with SessionLocal() as s:
+    listing = s.query(Listing).filter_by(book_id=trashed_id).one()
+    assert listing.status == ListingStatus.TRASHED, "лот вышел из корзины!"
+
+# 3. wb_trash не подбирает TRASHED-лоты в очередь повторного удаления.
+with SessionLocal() as s:
+    s.query(SyncLog).delete(); s.commit()
+with SessionLocal() as s:
+    res = move_withdrawn_to_trash(s, limit=100)
+    s.commit()
+    assert res["processed"] == 0, f"wb_trash подобрал TRASHED-лот: {res}"
+    assert all(nm != 999001 for nm in _wb_trash_deletes), "карточка отправлена в корзину повторно!"
+with SessionLocal() as s:
+    listing = s.query(Listing).filter_by(book_id=trashed_id).one()
+    assert listing.status == ListingStatus.TRASHED, "лот из корзины снова удалялся!"
+
+# 4. withdraw_book_everywhere не трогает TRASHED-лоты (кросс-снятие продажи).
+from app.sync import withdraw_book_everywhere
+with SessionLocal() as s:
+    b = s.get(Book, trashed_id)
+    b.status = BookStatus.IN_STOCK  # эмуляция: книга якобы снова активна
+    ok = withdraw_book_everywhere(s, b)
+    s.commit()
+with SessionLocal() as s:
+    listing = s.query(Listing).filter_by(book_id=trashed_id).one()
+    assert listing.status == ListingStatus.TRASHED, "withdraw_book_everywhere тронул TRASHED-лот!"
+
+# 5. Сверка каталога целиком (upsert) тоже не выводит TRASHED из корзины,
+#    когда карточки в выгрузке WB нет (а другие карточки есть — сверка идёт).
+_fake_wb_cards = [{"vendorCode": "LIVE-1", "title": "Живая", "brand": "И",
+                   "sizes": [{"price": 100, "skus": ["live-1"]}]}]
+_fake_wb_stocks = [{"sku": "live-1", "amount": 1}]
+with SessionLocal() as s:
+    res = sync_marketplace(s, "wildberries")
+    s.commit()
+_fake_wb_cards = []
+_fake_wb_stocks = []
+with SessionLocal() as s:
+    listing = s.query(Listing).filter_by(book_id=trashed_id).one()
+    assert listing.status == ListingStatus.TRASHED, "полная сверка воскресила TRASHED-лот!"
+
+# 6. Метка статуса в UI — человеческая, а не «trashed».
+assert listing_status_label("trashed") == "В корзине WB", "нет человеческой метки TRASHED"
+
+print("[ok] TRASHED терминальный: ни сверка, ни кросс-снятие, ни wb_trash не воскрешают лот")
+
+# Чистим данные под следующий блок.
+with SessionLocal() as s:
+    s.query(Order).delete(); s.query(Listing).delete(); s.query(Book).delete(); s.commit()
 
 
 # --- Чистка ---------------------------------------------------------------

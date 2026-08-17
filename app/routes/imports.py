@@ -258,16 +258,16 @@ def fix_wb_external_ids(db: Session = Depends(get_db)):
     if not listings:
         return RedirectResponse("/?synced=" + quote("WB-лотов в базе нет"), status_code=303)
 
-    # Запрашиваем все карточки с WB
+    # Запрашиваем все карточки с WB (fetch_catalog — то же, что и сверка каталога)
     try:
-        cards_data = client.list_catalog()
+        cards_data = client.fetch_catalog()
     except MarketplaceError as exc:
         return RedirectResponse("/?synced=" + quote(f"Не удалось получить каталог WB: {exc}"), status_code=303)
 
     # Индекс по vendorCode для быстрого поиска
     cards_by_vendor = {}
     for card in cards_data:
-        vendor_code = card.get("sku")  # list_catalog возвращает sku как vendorCode
+        vendor_code = card.get("sku")  # fetch_catalog возвращает sku как vendorCode
         nm_id = card.get("external_id")  # и external_id как nmID (если есть)
         if vendor_code and nm_id:
             try:

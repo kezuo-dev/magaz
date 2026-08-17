@@ -419,8 +419,7 @@ def wb_trash(db: Session = Depends(get_db), days: int = Form(7)):
     Принимает параметр days — период в днях (0 = все книги за всё время).
     По умолчанию 7 дней — безопасный период без риска схлопнуть лимит.
     """
-    days_arg = None if days <= 0 else days
-    result = move_withdrawn_to_trash(db, days=days_arg)
+    result = move_withdrawn_to_trash(db, days=days if days > 0 else None)
     db.commit()
 
     processed = result.get("processed", 0)
@@ -432,7 +431,7 @@ def wb_trash(db: Session = Depends(get_db), days: int = Form(7)):
     else:
         message = f"WB: удалено в корзину {deleted} из {processed}"
         if result.get("skipped"):
-            message += f", отложено {result['skipped']} (лимит — попробуйте завтра)"
+            message += f", отложено {result['skipped']} (лимит WB — продолжим автоматически)"
         if failed:
             message += f", не удалось {failed}"
 

@@ -157,7 +157,7 @@ def withdraw_book_everywhere(db: Session, book: Book, *, except_marketplace: str
     targets = [
         l for l in book.listings
         if not (except_marketplace and l.marketplace == except_marketplace)
-        and l.status not in (ListingStatus.WITHDRAWN,)
+        and l.status not in (ListingStatus.WITHDRAWN, ListingStatus.TRASHED)
     ]
     if not targets:
         return True
@@ -383,7 +383,8 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
                 # новые книги с другим артикулом — поэтому помечаем лот площадки
                 # «удалён из продажи»: следующая сверка не поднимет карточку в ACTIVE
                 # даже если площадка снова покажет её «В продаже» (остаток вернулся
-                # после возврата), а принудительно её сожмёт (Ozon — архив, WB — корзина).
+                # после возврата), а принудительно её сожмёт (Ozon — обнуление
+                # остатка, WB — корзина).
                 order.cancelled = True
                 processed_count += 1
                 # Ставим WITHDRAWN на всякий случай (в старых базах до этого фикса

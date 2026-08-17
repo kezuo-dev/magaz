@@ -60,12 +60,17 @@ def move_withdrawn_to_trash(
     db: Session,
     limit: int | None = None,
     verbose: bool = True,
+    days: int | None = None,
 ) -> dict:
     """Удалить снятые книги в корзину WB. Возвращает {processed, deleted, failed}.
 
     limit — максимум книг за проход. None = применяется MAX_BOOKS_PER_RUN.
     Защита от зависания: если backlog огромный, берём порцию, остальное — в
     следующий раз. FIFO (старые книги первыми) гарантирует, что backlog не растёт.
+
+    days — брать только книги, снятые за последние N дней (по updated_at книги).
+    None = без ограничения периода. Ручной запуск из UI передаёт выбор человека
+    («сутки», «7 дней», …), фоновая задача — None.
 
     verbose — писать в журнал даже когда удалять нечего. Ручной запуск из UI
     ставит True (пользователь нажал кнопку и ждёт отчёта), автозапуск по
@@ -113,7 +118,14 @@ def move_withdrawn_to_trash(
                 & Listing.external_id.regexp_match(r"^\d+$")
             ),
         )
-        .order_by(Book.updated_at.asc())  # FIFO: старые книги первыми
+    )
+    if days is not None:
+        # Период из UI («снятые за последние N дней»): фильтруем по моменту
+        # снятия книги (updated_at). Раньше параметр days молча игнорировался —
+        # выбор «сутки» и «всё время» давали одинаковую FIFO-очередь.
+        query = query.where(Book.updated_at >= utcnow() - timedelta(days=days))
+    query = (
+        query.order_by(Book.updated_at.asc())  # FIFO: старые книги первыми
         .limit(max_books)
     )
 

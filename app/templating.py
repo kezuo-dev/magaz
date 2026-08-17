@@ -41,6 +41,7 @@ LISTING_STATUS_LABELS = {
     "active": "Активно",
     "withdrawing": "Снимается",
     "withdrawn": "Снято",
+    "trashed": "В корзине WB",
     "error": "Ошибка",
 }
 

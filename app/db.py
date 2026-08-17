@@ -111,19 +111,32 @@ def ensure_schema() -> None:
     # вызывают лишние запросы к API и получают 429.
     # Критерий: есть запись в sync_log с action='wb_trash', ok=TRUE и текстом
     # "удалена в корзину WB" для данной книги — значит, API подтвердил удаление.
-    if "listings" in tables and "sync_log" in tables:
+    # С 2026-08 итоговые записи wb_trash больше не ссылаются на book_id (список
+    # SKU одной строкой), поэтому дополнительно сопоставляем по SKU из message:
+    # если в записи упоминается SKU книги, её лот удалён.
+    if "listings" in tables and "sync_log" in tables and "books" in tables:
         with engine.begin() as conn:
             conn.execute(text("""
                 UPDATE listings
                 SET status = 'trashed'
                 WHERE marketplace = 'wildberries'
                   AND status != 'trashed'
-                  AND book_id IN (
-                      SELECT DISTINCT book_id FROM sync_log
-                      WHERE action = 'wb_trash'
-                        AND ok = TRUE
-                        AND message LIKE '%удалена в корзину WB%'
-                        AND book_id IS NOT NULL
+                  AND (
+                      book_id IN (
+                          SELECT DISTINCT book_id FROM sync_log
+                          WHERE action = 'wb_trash'
+                            AND ok = TRUE
+                            AND message LIKE '%удалена в корзину WB%'
+                            AND book_id IS NOT NULL
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM sync_log l
+                          JOIN books b ON b.id = listings.book_id
+                          WHERE l.action = 'wb_trash'
+                            AND l.ok = TRUE
+                            AND l.message LIKE '%удалена в корзину WB%'
+                            AND l.message LIKE '%' || b.sku || '%'
+                      )
                   )
             """))
 
