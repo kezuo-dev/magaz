@@ -129,33 +129,17 @@ class OzonClient(MarketplaceClient):
         self._set_stock(offer_id, 0)
 
     def withdraw(self, listing) -> None:
-        """Снять лот с продажи — обнуляем остаток по offer_id, затем архивируем карточку.
+        """Снять лот с продажи — обнулить остаток. Архивацию НЕ делаем.
 
-        Обнуление остатка НЕ убирает карточку из раздела «В продаже» на Ozon — она
-        продолжает висеть с остатком 0. Чтобы реально снять с продажи, нужен второй
-        шаг: архивация через /v1/product/archive. Если архивация не прошла — логируем
-        warning, но не роняем снятие (остаток уже обнулён, книга фактически не продаётся).
+        Раньше здесь была архивация через /v1/product/archive — от неё отказались:
+        книги б/у после снятия нужно возвращать в продажу при отмене заказа, а из
+        архива карточку не достать. Обнулённый остаток и так снимает книгу с продажи.
         """
         offer_id = listing.external_id
         if not offer_id:
             raise MarketplaceError("У лота Ozon нет offer_id — нечего снимать")
         self.last_warning = None
-        # Шаг 1: обнуляем остаток
         self._set_stock(offer_id, 0)
-
-        # Шаг 2: архивируем карточку (убираем из раздела «В продаже»)
-        try:
-            self._archive_product(offer_id)
-        except MarketplaceError as exc:
-            # Не роняем всё снятие, если архивация не прошла — остаток уже обнулён,
-            # книга фактически не продаётся (покупатель не сможет заказать). Но и
-            # молчать нельзя: карточка останется висеть как «Готов к продаже».
-            # Пишем в last_warning — sync.py положит это в журнал видимой строкой.
-            self.last_warning = (
-                f"Остаток обнулён, но карточку {offer_id} не удалось заархивировать: {exc}"
-            )
-            import logging
-            logging.getLogger("ozon").warning(self.last_warning)
 
     def _set_stock(self, offer_id: str, stock: int) -> None:
         """Выставить остаток на складе FBS.
@@ -201,77 +185,16 @@ class OzonClient(MarketplaceClient):
             ) or "Ozon не обновил остаток (причина не указана)"
             raise MarketplaceError(f"Ozon не обновил остаток по {offer_id}: {reason}")
 
-    def _resolve_product_id(self, offer_id: str) -> int:
-        """Узнать числовой product_id Ozon по нашему offer_id (артикулу).
-
-        /v1/product/archive принимает ТОЛЬКО числовой product_id — внутренний ID
-        карточки на стороне Ozon. Раньше мы передавали туда offer_id (наш
-        артикул-строку): Ozon такой запрос не выполнял, карточка оставалась в
-        продаже и переходила в «Готов к продаже» после обнуления остатка, а
-        ошибка глохла в warning'е. Поэтому ID запрашиваем явно.
-        """
-        info = self._post("/v3/product/info/list", {"offer_id": [offer_id]})
-        items = (info.get("result") or {}).get("items") or info.get("items") or []
-        for prod in items:
-            if str(prod.get("offer_id") or "") != str(offer_id):
-                continue
-            # v3 отдаёт внутренний ID в поле id; у более старых ответов — product_id.
-            raw = prod.get("id") or prod.get("product_id")
-            try:
-                product_id = int(raw)
-            except (TypeError, ValueError):
-                break
-            if product_id > 0:
-                return product_id
-            break
-        raise MarketplaceError(
-            f"Ozon не вернул product_id для артикула {offer_id} — карточку не заархивировать"
-        )
-
-    def _archive_product(self, offer_id: str) -> None:
-        """Переместить карточку товара в архив.
-
-        Обнуление остатка НЕ убирает карточку из раздела «В продаже» — она висит
-        с остатком 0 и показывается как «Готов к продаже». Архивация через
-        /v1/product/archive реально скрывает её, но требует числовой product_id.
-        """
-        product_id = self._resolve_product_id(offer_id)
-        self._post(
-            "/v1/product/archive",
-            {"product_id": [product_id]},
-        )
-
-    def _unarchive_product(self, offer_id: str) -> None:
-        """Разархивировать карточку — вернуть из архива в «Готов к продаже»."""
-        product_id = self._resolve_product_id(offer_id)
-        self._post(
-            "/v1/product/unarchive",
-            {"product_id": [product_id]},
-        )
-
     def restore(self, listing) -> None:
         """Вернуть карточку Ozon в продажу после отмены заказа.
 
-        Шаг 1 — разархивировать (карточка уходит в «Готов к продаже»).
-        Шаг 2 — выставить остаток 1 (книга снова продаётся).
-        Если разархивация не прошла — предупреждение, но остаток всё равно
-        выставляем: Ozon может и сам разархивировать при ненулевом остатке.
+        Карточки в архив мы не убираем (снятие — только обнуление остатка),
+        поэтому восстановление — просто выставить остаток 1.
         """
         offer_id = listing.external_id
         if not offer_id:
             raise MarketplaceError("У лота Ozon нет offer_id — нечего восстанавливать")
         self.last_warning = None
-        # Шаг 1: разархивируем карточку
-        try:
-            self._unarchive_product(offer_id)
-        except MarketplaceError as exc:
-            self.last_warning = (
-                f"Не удалось разархивировать карточку {offer_id}: {exc}. "
-                "Остаток выставлен, но карточка может остаться в архиве."
-            )
-            import logging
-            logging.getLogger("ozon").warning(self.last_warning)
-        # Шаг 2: выставляем остаток 1
         self._set_stock(offer_id, 1)
 
     def fetch_catalog(self) -> list[dict]:
@@ -394,9 +317,9 @@ class OzonClient(MarketplaceClient):
 
         Используем /v4/product/info/stocks с visibility=IN_SALE: в ответ попадают
         только карточки, реально видимые покупателям. Если offer_id в ответе нет —
-        карточка уже снята / заархивирована. Именно этой проверкой нужно пользоваться
+        карточка уже снята. Именно этой проверкой нужно пользоваться
         для сверки снятых книг: у проданной книги остаток available=0 (reserved=present),
-        поэтому fetch_stocks всегда возвращает 0 даже для не заархивированных карточек.
+        поэтому fetch_stocks всегда возвращает 0 даже для снятой карточки.
         """
         result: set[str] = set()
         if not keys:

@@ -95,7 +95,6 @@ _fake_ozon_info = {"items": []}                  # /v3/product/info/list
 _fake_ozon_stocks = {"items": []}                # /v4/product/info/stocks
 _fake_wb_cards = []                              # карточки WB
 _fake_wb_stocks = []                            # остатки FBS WB: [{"sku","amount"}]
-_ozon_unarchived = []                           # product_id, разархивированные при отмене
 
 # ozon.httpx и wb.httpx — один и тот же модуль. Подменяем post/request общими
 # диспетчерами, маршрутизирующими по URL.
@@ -112,13 +111,9 @@ def fake_post(url, json=None, data=None, headers=None, timeout=None):
         return FakeResponse(200, {"result": [{"updated": True}]})
     if url.endswith("/v3/posting/fbs/list"):
         return FakeResponse(200, {"result": _fake_orders})
-    if url.endswith("/v1/product/archive"):
-        return FakeResponse(200, {"result": True})
-    if url.endswith("/v1/product/unarchive"):
-        # Разархивация при восстановлении после отмены заказа.
-        for pid in (json or {}).get("product_id") or []:
-            _ozon_unarchived.append(pid)
-        return FakeResponse(200, {"result": True})
+    # Архивация/разархивация Ozon НЕ используется (снятие — только обнуление
+    # остатка, restore — только выставление остатка). Если код их вызовет —
+    # тест упадёт с явной ошибкой.
     raise AssertionError(f"неожиданный POST: {url}")
 
 

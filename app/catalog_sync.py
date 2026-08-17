@@ -113,8 +113,8 @@ def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing)
 
     if is_auto_withdraw_enabled(db):
         # Локально снимаем лоты на остальных площадках БЕЗ вызова API — сверка каталога
-        # реагирует на факт пропажи (книга уже снята/продана площадкой), поэтому живой
-        # вызов withdraw() только заархивирует Ozon-карточку, которая ещё в продаже.
+        # реагирует на факт пропажи (книга уже снята/продана площадкой), поэтому
+        # живой вызов withdraw() не нужен (а для WB лишний раз дёргал бы корзину).
         for other_listing in book.listings:
             if other_listing.marketplace != marketplace and other_listing.status == ListingStatus.ACTIVE:
                 other_listing.status = ListingStatus.WITHDRAWN
@@ -304,7 +304,7 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             #   повторно уходили покупателям.
             #
             # Вместо этого принудительно сжимаем карточку через живой API:
-            #   - Ozon: _set_stock(0) + archive_product;
+            #   - Ozon: _set_stock(0);
             #   - WB:   _set_stock(0) + move_to_trash.
             # Если площадка выключена или API недоступен — всё равно не поднимаем в
             # ACTIVE: просто держим WITHDRAWN локально. reconcile_disappeared ниже
@@ -334,7 +334,7 @@ def _force_remove_from_sale(
 ) -> None:
     """Живой вызов API: сжать карточку площадки, которая не должна вернуться в продажу.
 
-    Ozon: _set_stock(0) + архивация (через withdraw → он сам делает оба шага).
+    Ozon: _set_stock(0) (архив не используем).
     WB: _set_stock(0) + перемещение в корзину (через withdraw).
 
     Если API недоступно/выключено — молча оставляем WITHDRAWN локально. Лот не
@@ -378,8 +378,8 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
 
     Проходим по всем НЕснятым лотам этой площадки. Если SKU книги нет в live_skus
     (площадка эту книгу больше не отдаёт как «в наличии») — снимаем книгу со всех
-    площадок и запускаем окно до архива. Так продажа/снятие на одной площадке
-    зеркалится на другую, даже если опрос заказов её не поймал.
+    площадок. Так продажа/снятие на одной площадке зеркалится на другую, даже
+    если опрос заказов её не поймал.
 
     Книги, у которых нет лота на этой площадке (например, только на WB), не
     затрагиваются — выбираем строго по marketplace. Возвращает число снятых книг.

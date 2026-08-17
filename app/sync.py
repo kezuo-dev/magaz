@@ -101,7 +101,7 @@ def withdraw_book(db: Session, book: Book, marketplace: str, *, use_sell: bool =
     """Снять книгу с одной площадки. True — если живой вызов прошёл успешно.
 
     use_sell=True — использовать sell() вместо withdraw(): обнуляет остаток без
-    архивации Ozon. Нужно для сверки снятых книг, чтобы не архивировать карточки.
+    дальнейших действий (WB не трогаем корзину). Нужно для сверки снятых книг.
     """
     listing = next((l for l in book.listings if l.marketplace == marketplace), None)
     if listing is None:

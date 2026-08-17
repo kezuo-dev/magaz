@@ -187,6 +187,8 @@ def move_withdrawn_to_trash(
     deleted = 0
     failed = 0
     skipped = 0  # не обработали из-за лимита (попробуем в следующий раз)
+    deleted_skus: list[str] = []   # SKU успешно удалённых — для итоговой записи
+    failed_skus: list[str] = []    # SKU, которые удалить не удалось
 
     # Удаляем пачками с паузами. Увеличены размеры пачек (5 → 30) и уменьшены
     # паузы (5с → 2с) для ускорения обработки при большом потоке продаж.
@@ -206,10 +208,8 @@ def move_withdrawn_to_trash(
             )
             for book, listing, nm in batch:
                 deleted += 1
+                deleted_skus.append(f"{book.sku} ({nm})")
                 listing.status = ListingStatus.TRASHED  # не трогать повторно
-                # ВАЖНО: всегда логируем удалённые карточки, чтобы можно было проверить
-                _log(db, action="wb_trash", ok=True, book_id=book.id,
-                     message=f"Карточка {nm} ({book.sku}) удалена в корзину WB")
         except MarketplaceError as exc:
             err = str(exc)
             # 429 — лимит. Останавливаемся, не множим запросы.
@@ -222,8 +222,7 @@ def move_withdrawn_to_trash(
             # Другая ошибка — пишем и идём дальше
             for book, listing, nm in batch:
                 failed += 1
-                _log(db, action="wb_trash", ok=False, book_id=book.id,
-                     message=f"Не удалось удалить карточку {nm} ({book.sku}) в корзину WB: {exc}")
+                failed_skus.append(f"{book.sku} ({nm})")
 
         # Пауза между пачками (кроме последней)
         if i + BATCH_SIZE < len(to_delete):
@@ -232,6 +231,10 @@ def move_withdrawn_to_trash(
     # Итог пишем при ручном запуске всегда, при автозапуске — только если реально
     # что-то произошло (удалили, не смогли или отложили по лимиту).
     # "Обработано" = реально отправлено в API (удалено + не удалось), без отложенных.
+    #
+    # ВАЖНО: не пишем по записи на каждую карточку — при 4000+ книг в очереди это
+    # сотни строк в журнале на каждый проход. Удалённые SKU перечисляем одной
+    # итоговой записью (так же как и ошибки).
     processed = deleted + failed
     if verbose or deleted or failed or skipped:
         msg_parts = []
@@ -243,6 +246,17 @@ def move_withdrawn_to_trash(
             msg_parts.append(f"отложено {skipped} (лимит WB)")
 
         message = f"Очистка корзины WB: {', '.join(msg_parts)}"
+        if deleted_skus:
+            # Показываем первые 10 SKU + счётчик остальных
+            shown = ", ".join(deleted_skus[:10])
+            if len(deleted_skus) > 10:
+                shown += f"… (всего {len(deleted_skus)})"
+            message += f" | Удалены: {shown}"
+        if failed_skus:
+            shown = ", ".join(failed_skus[:10])
+            if len(failed_skus) > 10:
+                shown += f"… (всего {len(failed_skus)})"
+            message += f" | Ошибки: {shown}"
         _log(db, action="wb_trash", ok=(failed == 0), message=message)
 
     return {"processed": processed, "deleted": deleted, "failed": failed, "skipped": skipped}

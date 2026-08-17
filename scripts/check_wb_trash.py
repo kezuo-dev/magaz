@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy import select
 from app.db import SessionLocal
-from app.models import Book, Listing, SyncLog, BookStatus
+from app.models import Book, Listing, SyncLog, BookStatus, ListingStatus
 
 
 def check_book(sku: str):
@@ -47,11 +47,13 @@ def check_book(sku: str):
         print(f"  stock_key: {wb_listing.stock_key}")
         print()
 
-        # Проверить логи удаления
+        # Проверить логи удаления. С 2026-08 удалённые карточки пишутся ОДНОЙ
+        # итоговой записью со списком SKU (без book_id) — ищем по SKU в сообщении,
+        # а не по book_id (старые записи остались с book_id, ищем оба).
         logs = db.scalars(
             select(SyncLog).where(
                 SyncLog.action == "wb_trash",
-                SyncLog.book_id == book.id
+                SyncLog.message.like(f"%{sku}%")
             ).order_by(SyncLog.created_at.desc())
         ).all()
 
@@ -81,10 +83,11 @@ def check_book(sku: str):
                 print(f"  {ok_mark} {log.created_at}: {log.message}")
             print()
 
-            # Проверить, была ли успешная удаление
-            success_logs = [l for l in logs if l.ok and "удалена в корзину" in l.message]
+            # Проверить, была ли успешная удаление (старые записи — per-book,
+            # новые — итоговая со списком SKU)
+            success_logs = [l for l in logs if l.ok and ("удалена в корзину" in l.message or "Удалены:" in l.message)]
             if success_logs:
-                print(f"✅ Книга БЫЛА УДАЛЕНА {len(success_logs)} раз(а)")
+                print(f"✅ Книга БЫЛА УДАЛЕНА ({len(success_logs)} записей в журнале)")
                 print(f"   Последний раз: {success_logs[0].created_at}")
             else:
                 print("❌ Успешных удалений НЕТ")
@@ -117,16 +120,11 @@ def check_all():
             if not wb_listing:
                 continue
 
-            logs = db.scalars(
-                select(SyncLog).where(
-                    SyncLog.action == "wb_trash",
-                    SyncLog.book_id == book.id,
-                    SyncLog.ok == True,
-                    SyncLog.message.like("%удалена в корзину%")
-                )
-            ).all()
-
-            if logs:
+            # Новый формат: итоговая запись со списком SKU (без per-book записей).
+            # Проверяем статус лота TRASHED — это признак фактического удаления,
+            # который ставится после успешного API-вызова. Журнал смотрим как
+            # дополнение (старые записи с book_id или итоговые списки).
+            if wb_listing.status == ListingStatus.TRASHED:
                 deleted_count += 1
                 status = "✅"
             elif wb_listing.external_id:
