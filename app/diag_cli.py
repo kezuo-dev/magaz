@@ -42,6 +42,9 @@ def main() -> int:
             print(f"  {lot.marketplace}: статус={lot.status}")
             print(f"     external_id={lot.external_id}  stock_key={lot.stock_key}")
             print(f"     синхр={lot.last_synced_at}  ошибка={lot.last_error}")
+            removed = getattr(lot, "removed_from_sale", False)
+            if removed:
+                print(f"     *** УДАЛЁН ИЗ ПРОДАЖИ (заказ отменён после отгрузки) ***")
 
         print("Площадки:")
         for acc in db.scalars(select(MarketplaceAccount)).all():

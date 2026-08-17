@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -136,6 +137,13 @@ class Listing(Base):
     # Храним отдельно, чтобы слежение за остатками спрашивало площадку по её ключу.
     stock_key: Mapped[str | None] = mapped_column(String(128), index=True, default=None)
     status: Mapped[str] = mapped_column(String(16), default=ListingStatus.PENDING, index=True)
+    # Заказ по этой книге был отменён ПОСЛЕ отгрузки. Книга физически возвращается,
+    # но на эту карточку/артикул её НИКОГДА не вернут: возвраты идут в работу новыми
+    # книгами с другим артикулом. Флаг защищает от повторного появления в продаже:
+    # если площадка снова покажет карточку «В продаже» (остаток вернулся после
+    # отмены), сверка не поднимет её в ACTIVE, а повторно сожмёт (Ozon — архив,
+    # WB — корзина) и оставит пометку.
+    removed_from_sale: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
 

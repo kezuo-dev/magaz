@@ -378,18 +378,34 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
             book = order.book
 
             if already_shipped:
-                # Книга уже передана в доставку: при отмене заказа она вернётся
-                # на склад площадки, но физически сейчас у нас её нет. Не трогаем
-                # статус — менеджер сам снимет остаток после получения книги обратно.
+                # Книга уже передана в доставку: физически её у нас нет, и на эту
+                # карточку она больше никогда не вернётся. Возвраты идут в работу как
+                # новые книги с другим артикулом — поэтому помечаем лот площадки
+                # «удалён из продажи»: следующая сверка не поднимет карточку в ACTIVE
+                # даже если площадка снова покажет её «В продаже» (остаток вернулся
+                # после возврата), а принудительно её сожмёт (Ozon — архив, WB — корзина).
                 order.cancelled = True
                 processed_count += 1
+                # Ставим WITHDRAWN на всякий случай (в старых базах до этого фикса
+                # лот мог остаться ACTIVE — площадка сама вернула карточку в продажу).
+                # Переводим в WITHDRAWN немедленно, чтобы refresh_book_status не поднял
+                # книгу обратно в IN_STOCK.
+                for listing in book.listings:
+                    if listing.marketplace == marketplace:
+                        if listing.status == ListingStatus.ACTIVE:
+                            listing.status = ListingStatus.WITHDRAWN
+                            listing.last_synced_at = utcnow()
+                        if not listing.removed_from_sale:
+                            listing.removed_from_sale = True
                 _log(db, marketplace=marketplace, action="order_cancelled",
                      ok=True, book_id=book.id,
                      message=(
-                         f"Заказ {order_id} отменён ПОСЛЕ отгрузки: "
-                         f"книга {book.sku} физически в пути — остаток не восстановлен. "
-                         f"Снимите вручную после получения возврата."
+                         f"Заказ {order_id} отменён ПОСЛЕ отгрузки: карточка {book.sku} "
+                         f"на {marketplace} помечена «удалена из продажи» — "
+                         f"при возврате она никогда не вернётся на этот артикул."
                      ))
+                # Пересчитываем статус книги: лот WITHDRAWN + заказ cancelled → WITHDRAWN.
+                refresh_book_status(db, book)
                 continue
 
             # Заказ отменён до отгрузки — восстанавливаем лоты и возвращаем книгу.

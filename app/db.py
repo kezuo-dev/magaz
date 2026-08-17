@@ -78,6 +78,12 @@ def ensure_schema() -> None:
         listing_cols = {col["name"] for col in inspector.get_columns("listings")}
         listing_additions = {
             "stock_key": "ALTER TABLE listings ADD COLUMN stock_key VARCHAR(128)",
+            # Признак «отменена после отгрузки, в продажу никогда не возвращать».
+            # DEFAULT FALSE, а не 0: Postgres не приводит integer к boolean и
+            # отвергает такой ALTER — на проде это ронял старт приложения целиком.
+            "removed_from_sale": (
+                "ALTER TABLE listings ADD COLUMN removed_from_sale BOOLEAN NOT NULL DEFAULT FALSE"
+            ),
         }
         with engine.begin() as conn:
             for column, ddl in listing_additions.items():
@@ -119,6 +125,28 @@ def ensure_schema() -> None:
                         AND message LIKE '%удалена в корзину WB%'
                         AND book_id IS NOT NULL
                   )
+            """))
+
+    # Backfill: помечаем removed_from_sale=True для книг, у которых уже были
+    # отменённые заказы после отгрузки (до появления этого фикса). Критерий:
+    # Order.cancelled=True И в журнале есть запись "отменён ПОСЛЕ отгрузки".
+    # Это закрывает дыру для книг, которые уже вернулись и снова продаются.
+    if "listings" in tables and "orders" in tables and "sync_log" in tables:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE listings
+                SET removed_from_sale = TRUE
+                WHERE book_id IN (
+                    SELECT DISTINCT o.book_id FROM orders o
+                    WHERE o.cancelled = TRUE
+                      AND o.book_id IS NOT NULL
+                      AND EXISTS (
+                          SELECT 1 FROM sync_log
+                          WHERE book_id = o.book_id
+                            AND action = 'order_cancelled'
+                            AND message LIKE '%отменён ПОСЛЕ отгрузки%'
+                      )
+                )
             """))
 
     # Индексы, добавленные после создания таблиц: create_all() их не досоздаёт.

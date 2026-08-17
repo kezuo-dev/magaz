@@ -78,8 +78,8 @@ MAX_WATCH_REMOVALS_PER_RUN = 10
 MAX_SYNC_REMOVALS_PER_RUN = 50
 
 
-def _log(db: Session, *, marketplace, action, ok, message) -> None:
-    db.add(SyncLog(marketplace=marketplace, action=action, ok=ok, message=message))
+def _log(db: Session, *, marketplace, action, ok, message, book_id=None) -> None:
+    db.add(SyncLog(marketplace=marketplace, book_id=book_id, action=action, ok=ok, message=message))
 
 
 def _parse_stock(raw) -> int | None:
@@ -293,6 +293,33 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             # если площадка вернула остаток 0, книга не должна висеть в продаже, даже если
             # in_sale случайно проставился в True (например, склад не настроен).
             _cross_withdraw(db, book, marketplace, listing)
+        elif listing.removed_from_sale:
+            # Карточка на площадке снова «в продаже» (площадка сама её подтянула:
+            # возврат после отгрузки, новый остаток и т.п.), но заказ по ней был
+            # отменён ПОСЛЕ отгрузки — значит книга физически вернулась и НИКОГДА не
+            # вернётся на этот артикул (возвраты идут в работу как новая книга с
+            # другим артикулом). Поднимать лот в ACTIVE нельзя, иначе:
+            #   refresh_book_status → IN_STOCK → watch_stocks/poll_orders продаст её
+            #   снова — и это тот самый баг, из-за которого возвращённые книги
+            #   повторно уходили покупателям.
+            #
+            # Вместо этого принудительно сжимаем карточку через живой API:
+            #   - Ozon: _set_stock(0) + archive_product;
+            #   - WB:   _set_stock(0) + move_to_trash.
+            # Если площадка выключена или API недоступен — всё равно не поднимаем в
+            # ACTIVE: просто держим WITHDRAWN локально. reconcile_disappeared ниже
+            # видит флаг removed_from_sale и не пытается «воскресить» такую книгу.
+            listing.status = ListingStatus.WITHDRAWN
+            listing.last_synced_at = utcnow()
+            _log(db, marketplace=marketplace, action="reconcile_removed", ok=True,
+                 book_id=book.id,
+                 message=(
+                     f"Книга {book.sku}: карточка {marketplace} снова появилась «в продаже», "
+                     f"но помечена «удалена из продажи» (отменённый отгруженный заказ) — "
+                     f"лот удержан в WITHDRAWN, карточку сожмём при следующем проходе корзины"
+                 ))
+            _force_remove_from_sale(db, book, marketplace, listing)
+            refresh_book_status(db, book)
         else:
             listing.status = ListingStatus.ACTIVE
             listing.last_synced_at = utcnow()
@@ -300,6 +327,50 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
                 live_skus.add(sku)
 
     return {"created": created, "updated": updated, "skipped": skipped, "live_skus": live_skus}
+
+
+def _force_remove_from_sale(
+    db: Session, book: Book, marketplace: str, listing: Listing
+) -> None:
+    """Живой вызов API: сжать карточку площадки, которая не должна вернуться в продажу.
+
+    Ozon: _set_stock(0) + архивация (через withdraw → он сам делает оба шага).
+    WB: _set_stock(0) + перемещение в корзину (через withdraw).
+
+    Если API недоступно/выключено — молча оставляем WITHDRAWN локально. Лот не
+    поднимется в ACTIVE из-за флага removed_from_sale, а физическое удаление
+    карточки выполнит wb_trash (для WB) или reconcile_withdrawn (для Ozon) в
+    ближайший проход.
+    """
+    from app.marketplaces import MarketplaceError
+    from app.security import decrypt_credentials
+
+    account = db.scalar(
+        select(MarketplaceAccount).where(MarketplaceAccount.marketplace == marketplace)
+    )
+    if not account or not account.enabled or not account.credentials_encrypted:
+        return
+    try:
+        creds = decrypt_credentials(account.credentials_encrypted)
+        client = get_client(marketplace, creds)
+    except Exception:
+        return
+    try:
+        client.withdraw(listing)
+        listing.status = ListingStatus.WITHDRAWN
+        listing.last_synced_at = utcnow()
+        listing.last_error = None
+        _log(db, marketplace=marketplace, action="withdraw", ok=True, book_id=book.id,
+             message=(
+                 f"Карточка {book.sku} на {marketplace} принудительно удалена: "
+                 f"заказ был отменён после отгрузки, возврат не возвращается на этот артикул"
+             ))
+    except MarketplaceError as exc:
+        listing.last_error = str(exc)
+        _log(db, marketplace=marketplace, action="withdraw", ok=False, book_id=book.id,
+             message=(
+                 f"Не удалось принудительно удалить карточку {book.sku} на {marketplace}: {exc}"
+             ))
 
 
 def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) -> int:

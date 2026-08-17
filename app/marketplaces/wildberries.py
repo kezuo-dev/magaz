@@ -367,19 +367,22 @@ class WBClient(MarketplaceClient):
         stocks = self.fetch_stocks(barcodes) if have_stock_data else {}
         for r in rows:
             bc = r.pop("_barcode", None)
-            amount = stocks.get(bc) if bc else None
+            if not bc:
+                # Карточка без баркода (skus пустой) — не может быть в продаже FBS.
+                # Помечаем явно, чтобы upsert не завёл её как новую книгу.
+                r["stock"] = None
+                r["in_sale"] = False
+                continue
+            amount = stocks.get(bc)
             r["stock"] = amount
-            if have_stock_data:
-                if amount is None:
-                    # WB не вернул остаток (неполный ответ склада / сбой API).
-                    # Оставляем in_sale=None → upsert_catalog_rows примет это как
-                    # «неизвестно» и не снимет книгу. Лучше оставить в продаже,
-                    # чем снять живую карточку из-за временного сбоя.
-                    r["in_sale"] = None
-                else:
-                    r["in_sale"] = bool(bc) and amount > 0
+            if amount is None:
+                # WB не вернул остаток (неполный ответ склада / сбой API).
+                # Оставляем in_sale=None → upsert_catalog_rows примет это как
+                # «неизвестно» и не снимет книгу. Лучше оставить в продаже,
+                # чем снять живую карточку из-за временного сбоя.
+                r["in_sale"] = None
             else:
-                r["in_sale"] = bool(bc)
+                r["in_sale"] = amount > 0
         return rows
 
     def fetch_orders(self) -> list[OrderInfo]:
