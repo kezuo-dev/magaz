@@ -162,6 +162,11 @@ def cleanup_wb_trash() -> None:
         failed = result.get("failed", 0)
         blocked = result.get("blocked", 0)
         skipped = result.get("skipped", 0)
+        logger.info(
+            "Очистка корзины WB (verbose=False): processed=%s deleted=%s failed=%s "
+            "blocked=%s skipped=%s",
+            result.get("processed", 0), deleted, failed, blocked, skipped,
+        )
         # Логируем только если что-то произошло
         if deleted or failed or blocked or skipped:
             parts = []
