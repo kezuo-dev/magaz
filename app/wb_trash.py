@@ -194,15 +194,23 @@ def move_withdrawn_to_trash(
         return {"processed": 0, "deleted": 0, "failed": 0, "blocked": 0, "skipped": 0,
                 "waiting": True}
 
-    # Находим снятые книги с лотом WB. Сортировка по updated_at DESC (новые
-    # первыми): свежие продажи уходят в корзину сразу, а не ждут, когда рассосётся
-    # старый backlog. Раньше было ASC (FIFO), и при тысячах «залежей» новые
-    # проданные книги стояли в очереди неделями.
+    # Находим снятые книги с лотом WB. Сортировка по updated_at DESC (свежие
+    # первыми), но БЕЗ книг в окне отмены, где заказ ещё может быть отменён:
+    #
+    #   - Книги со свежим (моложе CANCEL_GRACE_DAYS) неотменённым заказом НЕ
+    #     берём в выборку сразу (NOT EXISTS в SQL): их карточка должна
+    #     переждать окно отмены. Раньше такие книги попадали в выборку и
+    #     отсекались уже ПОСЛЕ (в цикле ниже), занимая до 100 мест и блокируя
+    #     остальные — при сортировке «свежие первыми» это оставляло каждый
+    #     прогон почти без работы, пока идут новые продажи.
+    #   - ВСЁ ОСТАЛЬНОЕ идёт на удаление: свежие продажи вне окна отмены и
+    #     «залежи» вперемешку, новые первыми.
     #
     # Старая логика (hours=3) создавала скользящее окно: книги старше 3 часов
     # пропадали из выборки навсегда, даже если их не успели удалить. При большом
     # потоке продаж (> 30 книг/час) backlog рос без границ.
     max_books = limit if limit is not None else MAX_BOOKS_PER_RUN
+    grace_until = utcnow() - timedelta(days=CANCEL_GRACE_DAYS)
     query = (
         select(Book)
         .options(selectinload(Book.listings))
@@ -217,6 +225,12 @@ def move_withdrawn_to_trash(
                 & (Listing.status != ListingStatus.TRASHED)
                 & (Listing.trash_blocked == False)  # noqa: E712
                 & Listing.external_id.regexp_match(r"^\d+$")
+            ),
+            # Исключаем книги со свежим неотменённым заказом (окно отмены): их
+            # карточку пока не трогаем, но и места они не должны занимать.
+            ~Book.orders.any(
+                (Order.cancelled == False)  # noqa: E712
+                & (Order.created_at >= grace_until)
             ),
         )
     )
@@ -250,28 +264,14 @@ def move_withdrawn_to_trash(
     #
     # Смысл пропуска — переждать возможную отмену, а она приходит в первые дни.
     # Поэтому блокируем удаление только на время окна отмены, дальше карточку
-    # проданной книги можно спокойно убирать.
-    book_ids = [b.id for b in books]
-    cancel_grace_cutoff = utcnow() - timedelta(days=CANCEL_GRACE_DAYS)
-    active_order_book_ids: set[int] = set(
-        db.scalars(
-            select(Order.book_id).where(
-                Order.book_id.in_(book_ids),
-                Order.cancelled == False,  # noqa: E712
-                Order.created_at >= cancel_grace_cutoff,
-            ).distinct()
-        ).all()
-    )
-
+    # проданной книги можно спокойно убирать. Окно отмены уже учтено в SQL
+    # (NOT EXISTS books.orders): книги с заказом моложе CANCEL_GRACE_DAYS в
+    # выборку не попадают и места не занимают.
+    #
     # Собираем nmID карточек для удаления
     to_delete = []
     no_nm_id: list[str] = []  # SKU книг без nmID — для диагностического лога
     for book in books:
-        # Пропускаем книги со свежим заказом: он ещё может быть отменён, и тогда
-        # карточку придётся достать из корзины обратно.
-        if book.id in active_order_book_ids:
-            continue
-
         listing = next((l for l in book.listings if l.marketplace == "wildberries"), None)
         if not listing or not listing.external_id:
             no_nm_id.append(f"{book.sku} (нет external_id)")
