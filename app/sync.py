@@ -411,7 +411,17 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
 
             # Заказ отменён до отгрузки — восстанавливаем лоты и возвращаем книгу.
             for listing in book.listings:
-                if listing.status not in (ListingStatus.WITHDRAWN, ListingStatus.ERROR):
+                # Восстанавливаем лоты, снятые этой продажей, в статусах WITHDRAWN
+                # и ERROR (обычное кросс-снятие) И в TRASHED (карточка уже ушла
+                # в корзину WB «сразу после продажи» — её надо достать обратно
+                # через recover). Раньше TRASHED здесь пропускался, и для свежих
+                # продаж, которые мы теперь убираем в корзину немедленно, отмена
+                # заказа не вернула бы карточку из корзины.
+                if listing.status not in (
+                    ListingStatus.WITHDRAWN,
+                    ListingStatus.ERROR,
+                    ListingStatus.TRASHED,
+                ):
                     continue
                 # Восстанавливаем ТОЛЬКО лоты, снятые этой продажей. Раньше цикл
                 # брал все снятые лоты книги без разбора: лот, снятый владельцем
