@@ -83,6 +83,12 @@ def main() -> int:
         print(f"  статус: {posting.get('status')}")
         print(f"  in_process_at: {posting.get('in_process_at')}")
         print(f"  deliver_date: {posting.get('deliver_date')}")
+        # Печатаем ВСЕ поля отправления — ищем признаки отгрузки помимо пустой
+        # истории статусов (shipment_date, delivering_date, tracking_number…).
+        other = {k: v for k, v in posting.items() if k not in ("products",)}
+        print(f"  все поля отправления ({len(other)}):")
+        for k, v in other.items():
+            print(f"    {k} = {v}")
         history = posting.get("status_history") or []
         print(f"  история статусов ({len(history)}):")
         for h in history:
