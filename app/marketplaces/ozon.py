@@ -391,10 +391,20 @@ class OzonClient(MarketplaceClient):
     def fetch_cancelled_orders(self) -> list["CancelledOrderInfo"]:
         """Получить отменённые отправления FBS за последние дни.
 
-        Статус 'cancelled' означает, что заказ не будет отгружен. Запрашиваем
-        историю статусов (status_history=true): если отправление прошло через
-        'awaiting_deliver' или 'delivering' — книга уже передана в доставку,
-        восстанавливать остаток не нужно (already_shipped=True).
+        Статус 'cancelled' означает, что заказ не будет отгружен. Книга уже
+        в пути (already_shipped=True, восстанавливать остаток не нужно), если
+        сработал ЛЮБОЙ из признаков отгрузки:
+
+        - в истории статусов был 'awaiting_deliver'/'delivering'/…
+          (status_history=true);
+        - поле delivering_date непустое — отправление реально уехало в доставку;
+        - cancellation.cancelled_after_ship == True — Ozon сам помечает отмену
+          «после отгрузки».
+
+        Только истории НЕ достаточно: Ozon часто отдаёт пустую status_history
+        для отменённых отправлений, хотя книга уехала (delivering_date при этом
+        стоит). Опора только на историю возвращала в продажу книги, которых
+        физически нет (баг с «книга в пути, а остатки восстановлены»).
         """
         from datetime import datetime, timedelta, timezone
         from app.marketplaces.base import CancelledOrderInfo
@@ -430,11 +440,19 @@ class OzonClient(MarketplaceClient):
                 order_number = posting.get("posting_number") or posting.get("order_number")
                 if not order_number:
                     continue
-                # Смотрим историю статусов: если был любой «отгрузочный» статус —
-                # книга уже в пути.
+                # Определяем, была ли книга передана в доставку. Одной истории
+                # мало: Ozon отдаёт пустую status_history для многих отменённых,
+                # хотя delivering_date / cancelled_after_ship показывают отгрузку.
                 history = posting.get("status_history") or []
                 past_statuses = {h.get("status") for h in history if h.get("status")}
-                already_shipped = bool(past_statuses & SHIPPED_STATUSES)
+                cancelled_after_ship = bool(
+                    (posting.get("cancellation") or {}).get("cancelled_after_ship")
+                )
+                already_shipped = (
+                    bool(past_statuses & SHIPPED_STATUSES)
+                    or bool(posting.get("delivering_date"))
+                    or cancelled_after_ship
+                )
                 result.append(CancelledOrderInfo(
                     external_order_id=str(order_number),
                     already_shipped=already_shipped,
