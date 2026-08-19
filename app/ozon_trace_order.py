@@ -93,8 +93,16 @@ def main() -> int:
         print(f"  история статусов ({len(history)}):")
         for h in history:
             print(f"    - {h.get('time')}  {h.get('status')}")
+        cancellation = posting.get("cancellation") or {}
+        cancelled_after_ship = bool(cancellation.get("cancelled_after_ship"))
+        print(f"  delivering_date: {posting.get('delivering_date')}")
+        print(f"  cancellation.cancelled_after_ship: {cancelled_after_ship}")
         past = {h.get("status") for h in history if h.get("status")}
-        shipped = bool(past & SHIPPED_STATUSES)
+        shipped = bool(
+            (past & SHIPPED_STATUSES)
+            or posting.get("delivering_date")
+            or cancelled_after_ship
+        )
         print(f"\n  Уже было в доставке (already_shipped)? {shipped}")
         print(
             "  → программа "
