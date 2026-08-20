@@ -453,9 +453,18 @@ class OzonClient(MarketplaceClient):
                     or bool(posting.get("delivering_date"))
                     or cancelled_after_ship
                 )
+                # Отмена продавцом «товар закончился на складе» (cancel_reason_id
+                # 352, «Товар закончился на складе»). Книгу не нашли физически —
+                # возвращать её в продажу нельзя.
+                cancellation = posting.get("cancellation") or {}
+                seller_out_of_stock = bool(
+                    cancellation.get("cancellation_type") == "seller"
+                    and str(cancellation.get("cancel_reason_id")) == "352"
+                )
                 result.append(CancelledOrderInfo(
                     external_order_id=str(order_number),
                     already_shipped=already_shipped,
+                    seller_out_of_stock=seller_out_of_stock,
                 ))
             if len(postings) < limit:
                 break

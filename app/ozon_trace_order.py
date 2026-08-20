@@ -95,8 +95,16 @@ def main() -> int:
             print(f"    - {h.get('time')}  {h.get('status')}")
         cancellation = posting.get("cancellation") or {}
         cancelled_after_ship = bool(cancellation.get("cancelled_after_ship"))
+        cancel_reason_id = str(cancellation.get("cancel_reason_id"))
+        seller_out_of_stock = bool(
+            cancellation.get("cancellation_type") == "seller"
+            and cancel_reason_id == "352"
+        )
         print(f"  delivering_date: {posting.get('delivering_date')}")
         print(f"  cancellation.cancelled_after_ship: {cancelled_after_ship}")
+        print(f"  cancellation_type: {cancellation.get('cancellation_type')} "
+              f"(reason_id={cancel_reason_id}, {cancellation.get('cancel_reason')})")
+        print(f"  seller_out_of_stock (352): {seller_out_of_stock}")
         past = {h.get("status") for h in history if h.get("status")}
         shipped = bool(
             (past & SHIPPED_STATUSES)
@@ -104,10 +112,13 @@ def main() -> int:
             or cancelled_after_ship
         )
         print(f"\n  Уже было в доставке (already_shipped)? {shipped}")
-        print(
-            "  → программа "
-            + ("НЕ должна была восстанавливать (книга в пути)" if shipped else "правильно восстановила (отмена до отгрузки)")
-        )
+        if seller_out_of_stock:
+            verdict = "НЕ возвращать в продажу: продавец отменил — товар закончился на складе"
+        elif shipped:
+            verdict = "НЕ должна была восстанавливать (книга в пути)"
+        else:
+            verdict = "правильно восстановила (отмена до отгрузки)"
+        print(f"  → программа: {verdict}")
         break
 
     if not found:

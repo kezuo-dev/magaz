@@ -356,6 +356,7 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
     for info in cancelled_infos:
         order_id = info.external_order_id
         already_shipped = info.already_shipped
+        seller_out_of_stock = getattr(info, "seller_out_of_stock", False)
 
         orders = db.scalars(
             select(Order).options(selectinload(Order.book).selectinload(Book.listings))
@@ -376,6 +377,23 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
                 continue
 
             book = order.book
+
+            if seller_out_of_stock:
+                # Продавец отменил заказ с причиной «товар закончился на складе» —
+                # книгу НЕ нашли физически (нет на полке). Возвращать её в продажу
+                # нельзя: она отсутствует. Помечаем заказ отменённым и НЕ
+                # восстанавливаем лоты. Отдельно лот площадки не трогаем: если
+                # книга найдётся позже, владелец сам выставит её заново.
+                order.cancelled = True
+                processed_count += 1
+                _log(db, marketplace=marketplace, action="order_cancelled",
+                     ok=True, book_id=book.id,
+                     message=(
+                         f"Заказ {order_id} отменён продавцом: товар закончился на "
+                         f"складе — книга {book.sku} НЕ возвращена в продажу"
+                     ))
+                refresh_book_status(db, book)
+                continue
 
             if already_shipped:
                 # Книга уже передана в доставку: физически её у нас нет, и на эту

@@ -31,15 +31,22 @@ class OrderInfo:
 
 @dataclass
 class CancelledOrderInfo:
-    """Отменённый заказ с признаком «уже отгружен».
+    """Отменённый заказ с признаками «как отменён».
 
     already_shipped=True означает, что книга была передана в доставку (добавлена
     в поставку WB или достигла статуса awaiting_deliver/delivering на Ozon).
     В этом случае физически книга ушла — восстанавливать остаток не нужно.
+
+    seller_out_of_stock=True — отмену инициировал ПРОДАВЕЦ с причиной «товар
+    закончился на складе» (Ozon: cancellation_type=seller, cancel_reason_id=352).
+    Это особый случай: книгу не нашли физически, поэтому возвращать её в продажу
+    нельзя — она отсутствует. Восстановление было бы ошибкой (книга «снова в
+    продаже», хотя её нет на полке).
     """
 
     external_order_id: str
     already_shipped: bool = False
+    seller_out_of_stock: bool = False
 
 
 class MarketplaceClient:
