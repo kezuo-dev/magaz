@@ -329,10 +329,25 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             _force_remove_from_sale(db, book, marketplace, listing)
             refresh_book_status(db, book)
         else:
-            listing.status = ListingStatus.ACTIVE
-            listing.last_synced_at = utcnow()
-            if sku:
-                live_skus.add(sku)
+            # Карточка на площадке есть и в продаже. Но если книга локально уже
+            # НЕ в продаже (sold/withdrawn — продана или снята вручную), поднимать
+            # лот в ACTIVE нельзя: это «воскресило» бы снятую книгу, и она снова
+            # продавалась бы без товара. Такое бывает, когда карточку вернули на
+            # площадку после отмены/возврата, а сверка не знает, что книга снята.
+            #
+            # Правильно — держать WITHDRAWN и дать wb_trash/reconcile_withdrawn
+            # сжать карточку. Иначе за час набираются «активные» лоты при снятых
+            # книгах (942 шт.), из-за которых сверка бьёт ложную тревогу
+            # «421 пропало».
+            if book.status == BookStatus.IN_STOCK:
+                listing.status = ListingStatus.ACTIVE
+                listing.last_synced_at = utcnow()
+                if sku:
+                    live_skus.add(sku)
+            else:
+                if listing.status != ListingStatus.WITHDRAWN:
+                    listing.status = ListingStatus.WITHDRAWN
+                    listing.last_synced_at = utcnow()
 
     return {"created": created, "updated": updated, "skipped": skipped, "live_skus": live_skus}
 
@@ -405,6 +420,17 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
         )
     ).all()
 
+    # «Пропавшими» считаем только книги, которые СЕЙЧАС в продаже (IN_STOCK).
+    # Книга со статусом SOLD/WITHDRAWN уже снята — её лот не «пропал», а просто
+    # застрял в ACTIVE (карточку вернули на площадку при отмене/возврате, а код
+    # не перевёл лот в WITHDRAWN). Раньше такие лоты попадали в would_remove
+    # тысячами, за каждый час сверка «снимала их заново» и била ложную тревогу
+    # «421 книг пропали» — хотя книги просто давно сняты. Их не надо трогать.
+    would_remove = [
+        l for l in listings
+        if l.book and l.book.sku not in live_skus and l.book.status == BookStatus.IN_STOCK
+    ]
+
     # Предохранитель от массового снятия при неполном ответе площадки.
     #
     # Два условия остановки:
@@ -415,7 +441,6 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
     #    3 карточки, а снять хочется 27 — это обрыв пагинации или сбой склада,
     #    а не реальные продажи. Настоящие продажи приходят постепенно; разом
     #    «продать» больше книг, чем сейчас в каталоге, невозможно.
-    would_remove = [l for l in listings if l.book and l.book.sku not in live_skus]
     tripped = len(would_remove) > MAX_SYNC_REMOVALS_PER_RUN or (
         live_skus and len(would_remove) > len(live_skus)
     )
