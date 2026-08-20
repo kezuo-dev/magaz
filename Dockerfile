@@ -16,6 +16,8 @@ RUN pip install --no-cache-dir -r requirements-prod.txt
 # Затем код приложения.
 COPY app ./app
 COPY run.py ./
+# Диагностические SQL-скрипты (запуск: psql -f /app/scripts/...).
+COPY scripts ./scripts
 
 # Не пишем .pyc и не буферизуем логи — удобнее смотреть вывод контейнера.
 ENV PYTHONDONTWRITEBYTECODE=1 \
