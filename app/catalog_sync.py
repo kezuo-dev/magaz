@@ -497,21 +497,50 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
         removed = 0
         for listing in would_remove[:MAX_SYNC_REMOVALS_PER_RUN]:
             book = listing.book
-            _cross_withdraw(db, book, marketplace, listing)
+            _reconcile_remove_one(db, book, marketplace, listing)
             removed += 1
-            _log(db, marketplace=marketplace, action="reconcile_removed", ok=True,
-                 message=f"Книга {book.sku} пропала с {marketplace}")
         return removed
 
     removed = 0
     for listing in would_remove:
         book = listing.book
-        _cross_withdraw(db, book, marketplace, listing)
+        _reconcile_remove_one(db, book, marketplace, listing)
         removed += 1
-        _log(db, marketplace=marketplace, action="reconcile_removed", ok=True,
-             message=f"Книга {book.sku} пропала с {marketplace}")
 
     return removed
+
+
+def _reconcile_remove_one(db: Session, book: Book, marketplace: str, listing: Listing) -> None:
+    """Снять одну книгу, пропавшую из ПОЛНОЙ выгрузки площадки.
+
+    Полная выгрузка — весь каталог площадки. Если карточки в ней НЕТ больше суток,
+    физически на площадке её не существует (удалена/в корзине/снята). Поэтому это
+    НЕ «снятие», а фиксация ФАКТА отсутствия:
+
+    - лот этой площадки помечаем терминальным TRASHED: корзина WB больше не будет
+      тратить на него лимит (удалять нечего — карточки нет), и сверка не будет
+      «воскрешать» его обратно (TRASHED исключён из очереди WB и из подъёма);
+    - книги на ДРУГИХ площадках (если есть) снимаем через живой API (withdraw_book)
+      только когда лот раньше был ACTIVE — то есть книга реально продавалась где-то
+      ещё. Если других активных лотов нет — просто фиксируем статус книги.
+    """
+    if marketplace == "wildberries" and listing.status != ListingStatus.TRASHED:
+        # Карточки физически нет в каталоге WB — удалять в корзину нечего.
+        # TRASHED исключает лот из очереди корзины (лимит WB не тратится впустую)
+        # и из дальнейших сверок. Пометка терминальная — книга не вернётся,
+        # пока её не выставят заново на площадке (тогда сверка заведёт ACTIVE).
+        listing.status = ListingStatus.TRASHED
+        listing.last_synced_at = utcnow()
+        _log(db, marketplace=marketplace, action="reconcile_removed", ok=True,
+             book_id=book.id,
+             message=f"Книга {book.sku}: карточки нет в выгрузке {marketplace} — лот помечен TRASHED (в корзину удалять нечего)")
+        refresh_book_status(db, book)
+        return
+
+    _cross_withdraw(db, book, marketplace, listing)
+    _log(db, marketplace=marketplace, action="reconcile_removed", ok=True,
+         book_id=book.id,
+         message=f"Книга {book.sku} пропала с {marketplace}")
 
 
 def sync_marketplace(db: Session, marketplace: str) -> dict:
