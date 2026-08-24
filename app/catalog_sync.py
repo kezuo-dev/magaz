@@ -26,6 +26,7 @@ marketplace.
 from __future__ import annotations
 
 import threading
+from datetime import timedelta
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, selectinload
@@ -41,7 +42,7 @@ from app.models import (
     utcnow,
 )
 from app.security import decrypt_credentials
-from app.sync import refresh_book_status
+from app.sync import _as_utc, refresh_book_status, withdraw_book
 
 # Поля книги, на которые сопоставляются колонки выгрузки (ключи = поля модели).
 TARGET_FIELDS = {
@@ -95,11 +96,11 @@ def _parse_stock(raw) -> int | None:
 def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing) -> None:
     """Единый путь снятия книги, пропавшей/проданной на площадке `marketplace`.
 
-    Помечаем лот этой площадки снятым (остатка там уже нет — живой вызов не нужен)
-    и локально снимаем лоты на остальных площадках. API других площадок НЕ вызываем:
-    сверка каталога обнаруживает факт пропажи постфактум (книга уже снята/продана),
-    и нет смысла дёргать API — достаточно пометить локально. Статус книги
-    пересчитывается единой функцией refresh_book_status.
+    Помечаем лот этой площадки снятым (остатка там уже нет — живой вызов не нужен),
+    а лоты на остальных площадках снимаем ЧЕРЕЗ ЖИВОЙ API (withdraw_book): без вызова
+    карточка площадки осталась бы физически в продаже при «снятой» книге в базе —
+    отсюда «в наличии на Ozon» при нуле на WB. Статус книги пересчитывается единой
+    функцией refresh_book_status.
 
     Кросс-снятие подчиняется рубильнику «Автоснятие» из Настроек: пока он выключен,
     лот пропавшей площадки помечаем снятым (это просто факт — там книги уже нет), а
@@ -120,13 +121,19 @@ def _cross_withdraw(db: Session, book: Book, marketplace: str, listing: Listing)
     listing.last_synced_at = utcnow()
 
     if is_auto_withdraw_enabled(db):
-        # Локально снимаем лоты на остальных площадках БЕЗ вызова API — сверка каталога
-        # реагирует на факт пропажи (книга уже снята/продана площадкой), поэтому
-        # живой вызов withdraw() не нужен (а для WB лишний раз дёргал бы корзину).
+        # Снимаем лоты на остальных площадках ЧЕРЕЗ ЖИВОЙ API (withdraw_book), а не
+        # только локально. Локальная пометка без вызова оставляла карточку площадки
+        # физически в продаже: книга «снята» в базе, но продолжает продаваться.
+        # Именно из-за этого книга показывалась «в наличии на Ozon» при нуле на WB.
+        # WB-карточки снимаем через sell() (обнуление остатка) — убирать их в корзину
+        # здесь не нужно и вредно (корзиной занимается wb_trash, а лишние вызовы API
+        # сжигают лимит). Снятые ранее/удалённые в корзину лоты не трогаем.
         for other_listing in book.listings:
-            if other_listing.marketplace != marketplace and other_listing.status == ListingStatus.ACTIVE:
-                other_listing.status = ListingStatus.WITHDRAWN
-                other_listing.last_synced_at = utcnow()
+            if other_listing.marketplace != marketplace and other_listing.status in (
+                ListingStatus.ACTIVE,
+                ListingStatus.ERROR,
+            ):
+                withdraw_book(db, book, other_listing.marketplace, use_sell=True)
     else:
         skipped = [
             l.marketplace for l in book.listings
@@ -211,6 +218,13 @@ def upsert_catalog_rows(db: Session, marketplace: str, rows: list[dict], mapping
             else:
                 skipped += 1
                 continue
+
+        # ВАЖНО: in_sale может быть None, когда площадка не вернула остаток по карточке
+        # (неполный ответ склада / сбой API) — это «не знаю», а НЕ «не продаётся».
+        # Проверяем строго через `is False`, иначе None уходил в «не продаётся» и
+        # живая карточка снималась с продажи на ОБЕИХ площадках по сбою API.
+        if in_sale is None:
+            in_sale = True
 
         if book:
             updated += 1
@@ -429,6 +443,20 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
     would_remove = [
         l for l in listings
         if l.book and l.book.sku not in live_skus and l.book.status == BookStatus.IN_STOCK
+    ]
+
+    # Книги, которые только-только пропали из выгрузки (впервые на этом проходе) —
+    # НЕ снимаем сразу: свежая карточка WB часто отсутствует в каталоге первые
+    # минуты после заведения (ещё не сгенерирован баркод/не попала в выдачу), а
+    # иногда и карточка Ozon пропадает из выгрузки на час. Если снимать такие
+    # книги немедленно, сверка хаотично снимала бы свежезаведённые книги с обоих
+    # площадок. Даём сутки, и только тогда снимаем: за сутки карточка либо
+    # появится в выгрузке, либо её действительно нет (удалена/в корзине).
+    # Без этого окна «потерянный час» превращался в ложное снятие тысячи книг.
+    grace_until = utcnow() - timedelta(days=1)
+    would_remove = [
+        l for l in would_remove
+        if _as_utc(l.last_synced_at) is None or _as_utc(l.last_synced_at) < grace_until
     ]
 
     # Предохранитель от массового снятия при неполном ответе площадки.
