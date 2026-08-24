@@ -490,7 +490,18 @@ def reconcile_disappeared(db: Session, marketplace: str, live_skus: set[str]) ->
                 f"Проверьте вручную: {skus_sample}…"
             ),
         )
-        return 0
+        # ВАЖНО: порог сработал — но снимать по-прежнему нужно, иначе сотни
+        # пропавших книг висят вечно. Снимаем порцию до предела, остальное —
+        # в следующий проход (через час). Это безопасно: карточки уже >суток
+        # отсутствуют в выгрузке, а не свежие.
+        removed = 0
+        for listing in would_remove[:MAX_SYNC_REMOVALS_PER_RUN]:
+            book = listing.book
+            _cross_withdraw(db, book, marketplace, listing)
+            removed += 1
+            _log(db, marketplace=marketplace, action="reconcile_removed", ok=True,
+                 message=f"Книга {book.sku} пропала с {marketplace}")
+        return removed
 
     removed = 0
     for listing in would_remove:
