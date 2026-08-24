@@ -11,7 +11,7 @@ last_synced_at (12-13.08) и не снимаются. Показываем:
     docker compose --env-file .env.prod exec app python3 -m app.diag_wb_missing
 """
 from app.db import SessionLocal
-from app.models import BookStatus, Listing, ListingStatus
+from app.models import Book, BookStatus, Listing, ListingStatus
 from sqlalchemy import func, select
 
 
