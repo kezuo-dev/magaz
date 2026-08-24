@@ -349,6 +349,17 @@ def process_cancelled_orders(db: Session, marketplace: str) -> int:
         _log(db, marketplace=marketplace, action="poll_cancellations", ok=False, message=str(exc))
         return 0
 
+    # Штатный источник отмен иногда отдаёт 404 (WB). Не молчим, а подхватываем
+    # из второго источника — листинга сборочных заданий со статусом cancelled.
+    # Это «чёрный» fallback без логирования, чтобы не дублировать записи:
+    # печатаем в журнал только если находка реально изменила картину.
+    if not cancelled_infos and hasattr(client, "fetch_cancellations_from_orders"):
+        try:
+            cancelled_infos = client.fetch_cancellations_from_orders()
+        except MarketplaceError as exc:
+            _log(db, marketplace=marketplace, action="poll_cancellations", ok=False, message=str(exc))
+            return 0
+
     if not cancelled_infos:
         return 0
 

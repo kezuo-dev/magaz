@@ -426,6 +426,42 @@ class WBClient(MarketplaceClient):
                     ))
             return result
         except MarketplaceError:
-            # Если эндпоинт не поддерживается — не роняем процесс, отмены
-            # просто не обработаются в этот раз.
+            # Если эндпоинт не поддерживается/отдал 404 — не роняем процесс,
+            # отмены просто не обработаются в этот раз.
+            return []
+
+    def fetch_cancellations_from_orders(self, since_days: int = 30) -> list["CancelledOrderInfo"]:
+        """Отменённые сборочные задания через листинг заказов (запасной путь).
+
+        Штатный эндпоинт отмен WB (/api/v3/orders/cancel) иногда отдаёт 404,
+        а отменённые заказы при этом существуют и лежат в сборочных заданиях.
+        Держим два независимых источника: если основной не дал ничего, пробуем
+        отфильтровать отмены по новым сборочным заданиям (там, где выгрузка их
+        отдаёт). Логика про уже отгруженные (supplyId) сохранена.
+
+        since_days — окно поиска отмен в истории заказов (по-умолчанию 30 дней).
+        """
+        from app.marketplaces.base import CancelledOrderInfo
+        try:
+            # Листинг сборочных заданий FBS с фильтром по статусам, включая
+            # отменённые: WB отдаёт поле status/cancelReason у задания.
+            data = self._request(
+                "GET",
+                f"{MARKETPLACE_URL}/api/v3/orders",
+                params={"limit": 1000, "since": int((time.time() - since_days * 86400)) * 1000},
+            )
+            result: list[CancelledOrderInfo] = []
+            for order in data.get("orders", []):
+                if str(order.get("status", "")).lower() != "cancelled":
+                    continue
+                order_id = order.get("id") or order.get("rid")
+                if order_id:
+                    already_shipped = bool(order.get("supplyId"))
+                    result.append(CancelledOrderInfo(
+                        external_order_id=str(order_id),
+                        already_shipped=already_shipped,
+                    ))
+            return result
+        except MarketplaceError:
+            # Листинг недоступен — отмены просто не обработаются в этот раз.
             return []
