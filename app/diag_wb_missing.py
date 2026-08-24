@@ -37,7 +37,7 @@ def main() -> int:
         print(f"активных WB-лотов: {total}, из них не обновлялись >3 суток: {stale}")
 
         examples = db.execute(
-            select(Listing.sku, BookStatus, Listing.last_synced_at, Listing.stock_key)
+            select(Book.sku, Book.status, Listing.last_synced_at, Listing.stock_key)
             .join(Listing.book)
             .where(
                 Listing.marketplace == "wildberries",
