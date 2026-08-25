@@ -106,10 +106,12 @@ def main() -> int:
               f"(reason_id={cancel_reason_id}, {cancellation.get('cancel_reason')})")
         print(f"  seller_out_of_stock (352): {seller_out_of_stock}")
         past = {h.get("status") for h in history if h.get("status")}
+        # Реальная передача в доставку: delivering_date ИЛИ статус доставки в
+        # истории. cancelled_after_ship НЕ признак (см. ozon.py — Ozon ставит
+        # его при плановой дате отгрузки, книга ещё на полке).
         shipped = bool(
             (past & SHIPPED_STATUSES)
             or posting.get("delivering_date")
-            or cancelled_after_ship
         )
         print(f"\n  Уже было в доставке (already_shipped)? {shipped}")
         if seller_out_of_stock:

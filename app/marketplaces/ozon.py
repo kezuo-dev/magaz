@@ -440,18 +440,22 @@ class OzonClient(MarketplaceClient):
                 order_number = posting.get("posting_number") or posting.get("order_number")
                 if not order_number:
                     continue
-                # Определяем, была ли книга передана в доставку. Одной истории
-                # мало: Ozon отдаёт пустую status_history для многих отменённых,
-                # хотя delivering_date / cancelled_after_ship показывают отгрузку.
+                # Определяем, была ли книга РЕАЛЬНО передана в доставку. Одной
+                # истории мало: Ozon отдаёт пустую status_history для многих
+                # отменённых, хотя delivering_date стоит.
+                #
+                # ВАЖНО: cancellation.cancelled_after_ship НЕ считаем признаком
+                # отгрузки. Ozon ставит его уже при назначенной ПЛАНОВОЙ дате
+                # отгрузки (shipment_date), хотя книга ещё на полке: statшные
+                # заказы с cancelled_after_ship=True, пустым delivering_date,
+                # пустым трек-номером и пустой историей статусов (проверено
+                # на проде 25.08) — книга не уехала, и отмену надо отработать
+                # как обычную (вернуть в продажу).
                 history = posting.get("status_history") or []
                 past_statuses = {h.get("status") for h in history if h.get("status")}
-                cancelled_after_ship = bool(
-                    (posting.get("cancellation") or {}).get("cancelled_after_ship")
-                )
                 already_shipped = (
                     bool(past_statuses & SHIPPED_STATUSES)
                     or bool(posting.get("delivering_date"))
-                    or cancelled_after_ship
                 )
                 # Отмена продавцом «товар закончился на складе» (cancel_reason_id
                 # 352, «Товар закончился на складе»). Книгу не нашли физически —
